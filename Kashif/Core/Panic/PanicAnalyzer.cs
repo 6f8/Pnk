@@ -7,6 +7,9 @@ namespace Kashif;
 /// <summary>خدمة في قائمة مراقب النظام: عدد مرات التسجيل الناجح خلال المدة، أو توقفها</summary>
 public sealed record ServiceStat(string Name, int Checkins, int Seconds, bool Stopped, int InducedCrashes);
 
+/// <summary>قناة اتصال بين SMC والمعالج الرئيسي (Mailbox N): هل توقفت (OUTBOX not ready)، والمفاتيح التي طُلبت فيها بالترتيب</summary>
+public sealed record SmcChannel(int Index, bool NotReady, List<string> Keys);
+
 /// <summary>سطر في الخط الزمني لسجلات الجهاز (التحليل المجمّع)</summary>
 public sealed record TimelineItem(DateTimeOffset? Time, string TimeText, string Kind, string Title, string TopPart, string Signature, string Source);
 
@@ -32,6 +35,10 @@ public sealed class Diagnosis
     public string SmcAssert = "", FaultingTask = "";
     /// <summary>خانات «S.sensor array» غير الصفرية (قيم خام من SMC — معناها غير موثّق، تُحفظ للمقارنة)</summary>
     public List<(int Index, long Value)> SensorArray = new();
+    /// <summary>قنوات SMC (Mailbox 0، 1 ...) مفصولة: القناة المتوقفة هي مكان العطل، والقنوات السليمة فيها قراءات دورية فقط</summary>
+    public List<SmcChannel> SmcChannels = new();
+    /// <summary>المفاتيح المذكورة بالاسم في سطر الفشل نفسه (مثل «SMC BSC failure, TAOP TAOC») — أقوى دليل على مكان العطل</summary>
+    public List<string> SmcFailedKeys = new();
     /// <summary>
     /// بصمة النمط للتعلّم من نتائج المحل: sensor:Prs0 أو smc:target/d94/target.cpp:250 أو service:wifid أو kind:AOP.
     /// فحصان بنفس البصمة = نفس نوع العطل من ناحية السجل.
@@ -82,6 +89,15 @@ public static class PanicAnalyzer
     static readonly Regex FaultingTaskRx = new(@"Faulting task\s+(\d+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     static readonly Regex SensorArrayRx = new(@"S\.sensor array\s*(\d+)\s*-\s*(\d+)\s*is\s*([^\n]*)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     static readonly Regex Outbox = new(@"OUTBOX\d*\s+not ready", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    static readonly Regex MailboxHead = new(@"Mailbox\s*\(\s*(\d+)\s*\)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    /// <summary>نهاية قسم القنوات: سجل RTBuddy (فيه نسخة من رسائل القناة 0) أو نهاية نص البانك</summary>
+    static readonly Regex MailboxEnd = new(@"RTBuddy\s*\(|Debugger message", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    /// <summary>«Misc(2) OUTBOX1 not ready» ← القناة 1 هي التي توقفت</summary>
+    static readonly Regex OutboxIndex = new(@"OUTBOX\s*(\d+)\s+not\s+ready", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    static readonly Regex ChannelNotReady = new(@"OUTBOX\s+not\s+ready", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    /// <summary>ما بعد «failure,» في سطر فشل SMC (قد يذكر المفاتيح التي فشلت قراءتها)</summary>
+    static readonly Regex FailureTail = new(@"failure\s*,\s*([^\n]*)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    static readonly Regex KeyToken = new(@"(?<![A-Za-z0-9])([A-Za-z][A-Za-z0-9]{3})(?![A-Za-z0-9])", RegexOptions.Compiled);
     static readonly Regex Hex64 = new(@"0x([0-9a-fA-F]{16})(?![0-9a-fA-F])", RegexOptions.Compiled);
     static readonly Regex RtkitClient = new(@"Client:\s*([A-Za-z0-9_.\-]+)", RegexOptions.Compiled);
     static readonly Regex GenericWatchdog = new(@"\bWDT\b|watchdog timeout", RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -162,6 +178,16 @@ public static class PanicAnalyzer
             Add(d, Parts.Ios, 55, "الجهاز معدّل (جيلبريك): التعديلات البرمجية سبب شائع للبانك");
             Bump(d, Parts.Ios, 10, "roots installed غير صفر");
             d.Evidence.Add(new("جهاز معدّل", "roots installed = " + log.RootsInstalled, "الجيلبريك والتعديلات البرمجية تسبب بانكات لا علاقة لها بالقطع", "roots"));
+        }
+
+        // ---------- علامة إصلاح سابق ----------
+        if (log.Repaired && d.Candidates.Count > 0)
+        {
+            d.Evidence.Add(new("علامة إصلاح في السجل", "repairStatus = " + log.RepairStatus,
+                "يُرجَّح أن الجهاز مرّ بإصلاح أو تبديل قطع (المعنى الدقيق للرقم غير موثّق). اسأل عمّا استُبدل: القطعة المستبدلة أول مشتبه به إذا ظهر البانك بعد الإصلاح.",
+                "repairStatus"));
+            if (d.Candidates.Any(c => c.Part == Parts.LastPart)) Bump(d, Parts.LastPart, 8, "السجل يحمل علامة إصلاح سابق (repairStatus)");
+            else Add(d, Parts.LastPart, 45, "السجل يحمل علامة إصلاح سابق (repairStatus)");
         }
 
         // ---------- ملاحظات القراءة ----------
@@ -353,7 +379,7 @@ public static class PanicAnalyzer
 
     /// <summary>
     /// السؤال التالي: من الأسئلة التي تستهدف إحدى القطع الأعلى (درجة 30 فأكثر، أول 4)، غير المجاب عنها وغير المستبعدة،
-    /// الأعلى أولًا بدرجة قطعته المستهدفة ثم أولوية السؤال. null إذا اكتمل الفحص (تشخيص مؤكد) أو لا يوجد سؤال مناسب.
+    /// الأعلى أولًا بدرجة قطعته المستهدفة ثم أولوية السؤال، والمجاني قبل ما يحتاج شراء قطعة. null إذا اكتمل الفحص (تشخيص مؤكد) أو لا يوجد سؤال مناسب.
     /// </summary>
     public static PanicKnowledge.Question NextQuestion(Diagnosis d, IReadOnlyList<(string Id, int Answer)> answers, IEnumerable<string> skip, out int remaining)
     {
@@ -364,7 +390,8 @@ public static class PanicAnalyzer
         var top = d.Candidates.Where(c => c.Score >= 30).Take(4).ToList();
         var ranked = PanicKnowledge.Current.Questions
             .Where(q => !done.Contains(q.Id) && q.Targets.Any(t => top.Any(c => c.Part == t)))
-            .Select(q => (q, w: top.Where(c => q.Targets.Contains(c.Part)).Max(c => c.Score) + q.Priority * 0.2))
+            // الفحص المجاني (سؤال، فصل، تنظيف) قبل الفحص الذي يحتاج شراء قطعة
+            .Select(q => (q, w: top.Where(c => q.Targets.Contains(c.Part)).Max(c => c.Score) + q.Priority * 0.2 + (q.Free ? 15 : 0)))
             .OrderByDescending(x => x.w).ThenBy(x => x.q.Id, StringComparer.Ordinal).ToList();
         remaining = ranked.Count;
         return ranked.Count == 0 ? null : ranked[0].q;
@@ -408,31 +435,100 @@ public static class PanicAnalyzer
             int start = int.Parse(sa.Groups[1].Value, CultureInfo.InvariantCulture);
             var values = sa.Groups[3].Value.Split(',').Select(v => v.Trim().Replace('O', '0').Replace('o', '0')).ToList();
             for (int i = 0; i < values.Count; i++)
-                if (long.TryParse(values[i], NumberStyles.Integer, CultureInfo.InvariantCulture, out var val) && val != 0) d.SensorArray.Add((start + i, val));
+                if (ParseNumber(values[i]) is long val && val != 0) d.SensorArray.Add((start + i, val));
             if (d.SensorArray.Count > 0)
-                d.Evidence.Add(new("مصفوفة حساسات SMC", string.Join("، ", d.SensorArray.Select(x => $"الخانة {x.Index} = {x.Value} (0x{x.Value:X})")),
-                    "قيم خام غير صفرية من SMC — معناها غير موثّق بعد، فلا تُستخدم في الترتيب؛ تُحفظ لمقارنة الفحوصات المتشابهة", "S.sensor array"));
+                d.Evidence.Add(new("مصفوفة حساسات SMC", string.Join("، ", d.SensorArray.Select(x => $"الخانة {x.Index} = 0x{x.Value:X} (البتات {string.Join("،", Bits(x.Value))})")),
+                    "قيمة غير صفرية بجانب رسالة الفشل: SMC يبلّغ عن حساس لم يستطع قراءته. رقم البت لا يُعرف له مكان موثّق، فحدّد الحساس بالعزل — ولا تفترض أنه البطارية.", "S.sensor array"));
         }
         if (AppleDevices.BoardCode(ps) is var board && board != "")
             d.Evidence.Add(new("رمز البوردة", board, "من مسار برنامج SMC في السجل", "target"));
         if (Outbox.IsMatch(ps))
             d.Evidence.Add(new("OUTBOX not ready", "نعم", "SMC توقف عن الرد على المعالج الرئيسي فأُعيد تشغيل الجهاز", "OUTBOX"));
-        foreach (var key in DecodeSmcKeys(ps))
+        // المفاتيح المذكورة في سطر الفشل نفسه
+        if (FailureTail.Match(ps) is { Success: true } ft2)
+            foreach (Match k in KeyToken.Matches(ft2.Groups[1].Value))
+            {
+                var key = k.Groups[1].Value;
+                if (key.Count(char.IsUpper) >= 2 && !d.SmcFailedKeys.Contains(key)) d.SmcFailedKeys.Add(key);
+            }
+        if (d.SmcFailedKeys.Count > 0)
+            d.Evidence.Add(new("مفاتيح في سطر الفشل", string.Join("، ", d.SmcFailedKeys),
+                "SMC ذكر بالاسم ما فشل في قراءته: " + string.Join("، ", d.SmcFailedKeys.Select(k => $"{k} = {PanicKnowledge.SmcKeyMeaning(k)}")) + " — هذا أقوى دليل في السجل على مكان العطل",
+                d.SmcFailedKeys[0]));
+
+        // القنوات مفصولة: القناة المتوقفة هي مكان العطل، وما في القنوات السليمة قراءات دورية
+        ReadChannels(d, ps);
+        foreach (var key in DecodeSmcKeys(ps).Concat(d.SmcChannels.SelectMany(c => c.Keys)))
             if (!d.SmcKeys.Contains(key)) d.SmcKeys.Add(key);
-        if (d.SmcKeys.Count > 0)
+        foreach (var c in d.SmcChannels)
+        {
+            string list = c.Keys.Count == 0 ? "لم تُقرأ رسائلها" : string.Join("، ", c.Keys);
+            string meaning = c.NotReady
+                ? "هذه القناة هي التي توقفت (OUTBOX not ready) — آخر ما طُلب فيها يشير إلى مكان العطل" +
+                  (c.Keys.Count > 0 ? ": " + string.Join("، ", c.Keys.Select(k => $"{k} = {PanicKnowledge.SmcKeyMeaning(k)}")) : "")
+                : "قناة كانت تعمل حتى الانهيار: فيها قراءات دورية (الحرارة والبطارية ...) وليست دليلًا على مكان العطل";
+            d.Evidence.Add(new(c.NotReady ? $"القناة المتوقفة Mailbox ({c.Index})" : $"قناة سليمة Mailbox ({c.Index})", list, meaning,
+                c.Keys.Count > 0 ? "0x" + Convert.ToHexString(Encoding.ASCII.GetBytes(c.Keys[0])) : "OUTBOX", c.NotReady ? "" : "info"));
+        }
+        if (d.SmcChannels.Count == 0 && d.SmcKeys.Count > 0)
         {
             var first = d.SmcKeys.FirstOrDefault(PanicKnowledge.IsBatteryKey) ?? d.SmcKeys[0];
-            d.Evidence.Add(new("آخر مفاتيح SMC", string.Join("، ", d.SmcKeys),
-                "فُكّت من رسائل Mailbox: " + string.Join("، ", d.SmcKeys.Select(k => $"{k} = {PanicKnowledge.SmcKeyMeaning(k)}")),
+            d.Evidence.Add(new("مفاتيح SMC", string.Join("، ", d.SmcKeys),
+                "فُكّت من رسائل Mailbox بدون معرفة القناة (السجل ناقص): " + string.Join("، ", d.SmcKeys.Select(k => $"{k} = {PanicKnowledge.SmcKeyMeaning(k)}")) +
+                " — دليل ضعيف: قد تكون قراءات دورية وليست مكان العطل",
                 "0x" + Convert.ToHexString(Encoding.ASCII.GetBytes(first))));
         }
+    }
+
+    /// <summary>
+    /// قنوات SMC: كل «Mailbox (N)» حتى القناة التالية أو سجل RTBuddy. القناة متوقفة إذا كان فيها «OUTBOX not ready»
+    /// أو ذكر رأس البانك رقمها («Misc(2) OUTBOX1 not ready» ← القناة 1). مفاتيحها تُفك بقاعدة أوسع (gP13 مفتاح صالح داخل القناة).
+    /// </summary>
+    static void ReadChannels(Diagnosis d, string ps)
+    {
+        int headerFail = OutboxIndex.Match(ps) is { Success: true } om && int.TryParse(om.Groups[1].Value, out var hf) ? hf : -1;
+        var heads = MailboxHead.Matches(ps).Cast<Match>().ToList();
+        for (int i = 0; i < heads.Count; i++)
+        {
+            int start = heads[i].Index, end = i + 1 < heads.Count ? heads[i + 1].Index : ps.Length;
+            var stop = MailboxEnd.Match(ps, start + 1);
+            if (stop.Success && stop.Index < end) end = stop.Index;
+            var block = ps[start..end];
+            int idx = int.Parse(heads[i].Groups[1].Value, CultureInfo.InvariantCulture);
+            bool notReady = ChannelNotReady.IsMatch(block) || idx == headerFail;
+            var keys = DecodeSmcKeys(block, relaxed: true);
+            var old = d.SmcChannels.FirstOrDefault(c => c.Index == idx);
+            if (old != null)
+            {
+                foreach (var k in keys) if (!old.Keys.Contains(k)) old.Keys.Add(k);
+                if (notReady && !old.NotReady) d.SmcChannels[d.SmcChannels.IndexOf(old)] = old with { NotReady = true };
+                continue;
+            }
+            d.SmcChannels.Add(new SmcChannel(idx, notReady, keys));
+        }
+        // رأس البانك يذكر قناة متوقفة لم يُنسخ قسمها (سجل مقطوع)
+        if (headerFail >= 0 && d.SmcChannels.All(c => c.Index != headerFail) && d.SmcChannels.Count > 0)
+            d.SmcChannels.Add(new SmcChannel(headerFail, true, new List<string>()));
+    }
+
+    static long? ParseNumber(string v)
+    {
+        v = v.Trim();
+        if (v.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            return long.TryParse(v.AsSpan(2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var h) ? h : null;
+        return long.TryParse(v, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) ? n : null;
+    }
+
+    static IEnumerable<int> Bits(long v)
+    {
+        for (int b = 0; b < 64; b++) if ((v & (1L << b)) != 0) yield return b;
     }
 
     /// <summary>
     /// مفاتيح SMC من رسائل Mailbox: قيمة ‎0x‎ من 16 خانة، أول 4 بايت منها حروف مقروءة (مثل ‎0x5447304200006013‎ ← TG0B).
     /// تُقبل فقط إذا كانت 4 حروف/أرقام تبدأ بحرف وفيها حرفان كبيران على الأقل — فلا تُقرأ الأرقام العادية كمفاتيح.
     /// </summary>
-    public static List<string> DecodeSmcKeys(string text)
+    public static List<string> DecodeSmcKeys(string text, bool relaxed = false)
     {
         var keys = new List<string>();
         foreach (Match m in Hex64.Matches(text ?? ""))
@@ -446,7 +542,8 @@ public static class PanicAnalyzer
                 chars[i] = (char)b;
                 ok = b is >= '0' and <= '9' or >= 'A' and <= 'Z' or >= 'a' and <= 'z';
             }
-            if (!ok || !char.IsLetter(chars[0]) || chars.Count(char.IsUpper) < 2) continue;
+            // داخل قناة معروفة يكفي حرف كبير واحد (gP13، ftD0)؛ خارجها حرفان لتجنّب قراءة الأرقام العادية كمفاتيح
+            if (!ok || !char.IsLetter(chars[0]) || chars.Count(char.IsUpper) < (relaxed ? 1 : 2)) continue;
             var key = new string(chars);
             if (!keys.Contains(key)) keys.Add(key);
         }
@@ -455,79 +552,137 @@ public static class PanicAnalyzer
 
     static void SmcDiagnosis(Diagnosis d, string ps)
     {
-        SmcDiagnosisByKeys(d);
-        // نص فشل معروف (SMC BSC failure ...): حالة مؤكدة لموديل محدد تغلب ترتيب المفاتيح
-        if (PanicKnowledge.FindSmcFailure(ps) is not { } f) return;
-        var (choices, specific) = f.LocateFor(d.Product);
-        d.Evidence.Add(new("نوع فشل SMC", f.Match, f.What + " — " + f.Note + (specific ? " (معلومة خاصة بهذا الموديل)" : ""), f.Match));
-        foreach (var c in choices) Add(d, c.Part, c.Score, c.Why);
-        if (!specific) return;
-        d.ModelSpecific = true;
-        d.Signature += "|" + f.Match.Replace(' ', '_');
-        var top = choices.OrderByDescending(c => c.Score).First();
-        d.Explanation += " وعلى هذا الموديل: " + f.Note;
-        d.Summary = $"«{f.Match}» على هذا الموديل ← السبب المؤكد في حالة سابقة: {top.Part}، ثم البطارية وموصلها.";
-        d.Steps.InsertRange(0, f.Steps);
-    }
-
-    static void SmcDiagnosisByKeys(Diagnosis d)
-    {
         d.Kind = "SMC";
         d.Title = "انهيار معالج الطاقة والحساسات (SMC)";
         d.Signature = "smc:" + (d.SmcAssert != "" ? d.SmcAssert : "?") + (d.FaultingTask != "" ? "|task" + d.FaultingTask : "");
         d.LearnPattern = d.SmcAssert;
-        // المفاتيح المؤكدة بالاسم (TG0B، B0AV ...) دليل قوي؛ المفاتيح التي تبدأ بـ B فقط دليل ضعيف
-        var strong = d.SmcKeys.Where(PanicKnowledge.IsBatteryKey).ToList();
-        var weak = d.SmcKeys.Where(PanicKnowledge.IsWeakBatteryKey).ToList();
+
+        // الدليل بالترتيب: (1) المفاتيح المذكورة في سطر الفشل، (2) مفاتيح القناة المتوقفة، (3) الباقي قراءات دورية أو مجهولة القناة
+        var failing = d.SmcChannels.FirstOrDefault(c => c.NotReady);
+        List<string> focus;
+        string source;
+        if (d.SmcFailedKeys.Count > 0) { focus = d.SmcFailedKeys; source = "سطر الفشل"; }
+        else if (failing is { Keys.Count: > 0 }) { focus = failing.Keys; source = $"القناة المتوقفة Mailbox ({failing.Index})"; }
+        else { focus = new List<string>(); source = ""; }
+        bool channelsKnown = d.SmcChannels.Count > 0;
+        string Keys(IEnumerable<string> ks) => string.Join("، ", ks.Select(k => $"{k} = {PanicKnowledge.SmcKeyMeaning(k)}"));
+
+        var strong = focus.Where(PanicKnowledge.IsBatteryKey).ToList();
+        var weak = focus.Where(PanicKnowledge.IsWeakBatteryKey).ToList();
+        bool batteryFocus = false;
+
         if (strong.Count > 0)
         {
+            batteryFocus = true;
             d.Signature += "|battery";
-            d.Explanation = "معالج SMC توقف أثناء قراءة بيانات البطارية (" + string.Join("، ", strong.Select(k => $"{k} = {PanicKnowledge.SmcKeyMeaning(k)}")) +
-                "). انقطاع الاتصال بشريحة قياس البطارية أو بحساس حرارتها هو السبب الأشيع لهذا الشكل.";
-            Add(d, Parts.Battery, 75, "آخر ما قرأه SMC قبل الانهيار كان بيانات البطارية (" + string.Join("، ", strong) + ")");
-            Add(d, Parts.BatteryConn, 65, "موصل غير محكم أو متأكسد يقطع الاتصال");
+            d.Explanation = $"SMC توقف وهو يقرأ بيانات البطارية ({Keys(strong)}) في {source}. انقطاع الاتصال بشريحة قياس البطارية أو بحساس حرارتها هو الأشيع لهذا الشكل.";
+            Add(d, Parts.Battery, 72, $"{source}: SMC توقف عند قراءة البطارية ({string.Join("، ", strong)})");
+            Add(d, Parts.BatteryConn, 66, "موصل غير محكم أو متأكسد يقطع الاتصال — افحصه قبل شراء بطارية");
             Add(d, Parts.SmcLine, 42, "إذا بقي البانك مع بطارية سليمة وموصل نظيف");
-            Add(d, Parts.ChargingFlex, 38, "بعض خطوط الطاقة والحساسات تمر عبرها");
+            Add(d, Parts.LastPart, 40, "إذا فُكّت قطعة قبل ظهور المشكلة");
             d.Confidence = "متوسطة";
-            d.Summary = "SMC انهار أثناء قراءة البطارية ← ابدأ بالبطارية وموصلها.";
-            d.Steps.AddRange(new[]
-            {
-                "افحص صحة البطارية في الإعدادات (رسالة «قطعة غير معروفة» أو «خدمة» تؤكد الاتجاه).",
-                "افصل البطارية ونظّف الموصل وأعد تركيبها بإحكام.",
-                "جرّب بطارية سليمة معروفة، أو شغّل الجهاز على مصدر طاقة DC.",
-                "إذا بقي نفس البانك: جرّب فلاتة شحن سليمة.",
-                "إذا استمر: فحص خط الاتصال بين SMC وشريحة قياس البطارية على البوردة.",
-            });
+            d.Summary = $"SMC توقف عند قراءة البطارية ({source}) ← افحص صحة البطارية ونظّف موصلها أولًا (مجانًا)، ثم جرّب بطارية سليمة من المخزون.";
         }
-        else if (weak.Count > 0)
+        else if (weak.Count > 0 && weak.Count == focus.Count)
         {
             d.Signature += "|b?";
-            d.Explanation = "معالج SMC توقف، وآخر المفاتيح المقروءة تبدأ بحرف B (" + string.Join("، ", weak) +
-                ") وهو حرف مفاتيح البطارية في تسمية Apple — لكنها ليست مفاتيح موثّقة بالاسم، فالدليل ضعيف.";
-            Add(d, Parts.Battery, 58, "مفاتيح تبدأ بـ B (غير موثّقة بالاسم)");
-            Add(d, Parts.BatteryConn, 52, "موصل البطارية");
-            Add(d, Parts.Board, 50, "SMC أو خطوطه على البوردة");
-            Add(d, Parts.ChargingFlex, 40, "خطوط الطاقة والحساسات");
+            d.Explanation = $"SMC توقف، وما كان يقرأه في {source} مفاتيح تبدأ بحرف B ({string.Join("، ", weak)}) — حرف مفاتيح البطارية في تسمية Apple، لكنها غير موثّقة بالاسم، فالدليل ضعيف.";
+            Add(d, Parts.Battery, 52, $"مفاتيح تبدأ بـ B في {source} (غير موثّقة بالاسم)");
+            Add(d, Parts.BatteryConn, 50, "موصل البطارية — افحصه ونظّفه أولًا");
+            Add(d, Parts.LastPart, 48, "القطعة التي فُكّت أو استُبدلت قبل المشكلة");
+            Add(d, Parts.Board, 45, "SMC أو خطوطه على البوردة");
             d.Confidence = "منخفضة";
-            d.Summary = "SMC انهار، والدليل على البطارية ضعيف ← جرّب البطارية ثم البوردة.";
-            d.Steps.AddRange(new[] { "جرّب بطارية سليمة أو مصدر طاقة DC.", "جرّب فلاتة شحن سليمة.", "اجمع عدة سجلات: تكرار نفس موضع الفشل يحدد القطعة.", "إذا استمر: فحص البوردة." });
+            d.Summary = "SMC توقف والدليل على البطارية ضعيف ← اختبار العزل ونظافة موصل البطارية قبل شراء أي قطعة.";
+        }
+        else if (focus.Count > 0)
+        {
+            d.Signature += "|sensor";
+            bool temps = focus.Any(k => k[0] == 'T');
+            d.Explanation = $"SMC توقف وهو ينتظر ردًا من {Keys(focus)} ({source}) — وهذه ليست بيانات البطارية." +
+                (temps ? " المفاتيح التي تبدأ بـ T حساسات حرارة موزعة على الجهاز (بعضها على فلاتات وقطع خارج البوردة)." : "") +
+                " مكان هذا الحساس غير موثّق في قاعدة المعرفة، فالطريقة الصحيحة هي اختبار العزل وليس تبديل القطع بالتخمين." +
+                (channelsKnown && d.SmcChannels.Any(c => !c.NotReady && c.Keys.Any(PanicKnowledge.IsBatteryKey))
+                    ? " قراءات البطارية ظهرت في قناة سليمة فقط، وهي قراءات دورية لا تدل على العطل." : "");
+            Add(d, Parts.LastPart, 62, "أول ما يُفحص: القطعة التي فُكّت أو استُبدلت قبل ظهور المشكلة (الشاشة وحساساتها خاصة)");
+            Add(d, Parts.FrontFlex, 58, "حساسات القرب والإضاءة وسماعة المكالمات على خطوط SMC — سبب مؤكد لبانك SMC BSC في حالة iPhone 13 Pro Max");
+            Add(d, Parts.ChargingFlex, 46, "فلاتة الشحن عليها حساسات وخطوط طاقة");
+            Add(d, Parts.Board, 44, "خطوط SMC على البوردة — إذا بقي الانهيار وكل الفلاتات الطرفية مفصولة");
+            Add(d, Parts.Battery, 25, "لا دليل في السجل على البطارية — لا تبدّلها قبل اختبار العزل");
+            d.Confidence = "منخفضة";
+            d.Summary = $"SMC لم يستطع قراءة {string.Join("، ", focus)} (ليست البطارية) ← اختبار العزل: افصل الفلاتات الطرفية واحدة واحدة قبل شراء أي قطعة.";
         }
         else
         {
-            d.Explanation = "معالج SMC يدير الطاقة والحرارة والحساسات. لم تظهر في السجل مفاتيح تحدد القطعة، فالترتيب عام.";
-            Add(d, Parts.Battery, 50, "أشيع سبب لانهيار SMC");
-            Add(d, Parts.ChargingFlex, 45, "خطوط الطاقة والحساسات");
-            Add(d, Parts.Board, 50, "SMC أو خطوطه على البوردة");
-            d.Confidence = "منخفضة";
-            d.Summary = "SMC انهار بدون مفاتيح واضحة ← جرّب البطارية ثم فلاتة الشحن ثم البوردة.";
-            d.Steps.AddRange(new[]
+            // بلا قنوات معروفة (سجل ناقص): مفاتيح البطارية قد تكون قراءات دورية، فهي دليل ضعيف فقط
+            bool anyStrong = !channelsKnown && d.SmcKeys.Any(PanicKnowledge.IsBatteryKey);
+            bool anyWeak = !channelsKnown && !anyStrong && d.SmcKeys.Any(PanicKnowledge.IsWeakBatteryKey);
+            d.Signature += channelsKnown ? "|routine" : anyStrong ? "|battery?" : anyWeak ? "|b?" : "|nokeys";
+            d.Explanation = "معالج SMC يدير الطاقة والحرارة والحساسات. السجل لا يحدد ما الذي توقف عنده" +
+                (channelsKnown ? " (القناة المتوقفة لم تُنسخ أو بلا رسائل، وما في القنوات السليمة قراءات دورية)" : "") +
+                (anyStrong || anyWeak ? " (في السجل مفاتيح بطارية لكن بلا قناة معروفة — قد تكون قراءات دورية)" : "") +
+                "، فالقطعة يحددها اختبار العزل.";
+            if (anyStrong)
             {
-                "جرّب بطارية سليمة أو مصدر طاقة DC.",
-                "جرّب فلاتة شحن سليمة.",
-                "اجمع عدة سجلات بانك وحلّلها معًا: تكرار نفس المفتاح أو موضع الفشل يحدد القطعة.",
-                "إذا استمر: فحص البوردة.",
-            });
+                Add(d, Parts.Battery, 52, "مفاتيح بطارية موثّقة في السجل، لكن القناة غير معروفة (دليل ضعيف)");
+                Add(d, Parts.BatteryConn, 48, "موصل البطارية — افحصه ونظّفه");
+            }
+            else if (anyWeak)
+            {
+                Add(d, Parts.Battery, 44, "مفاتيح تبدأ بـ B (غير موثّقة) بلا قناة معروفة — دليل ضعيف");
+                Add(d, Parts.BatteryConn, 42, "موصل البطارية — افحصه ونظّفه");
+            }
+            else Add(d, Parts.Battery, 35, "سبب شائع لانهيار SMC، لكن لا دليل عليه في هذا السجل");
+            Add(d, Parts.LastPart, 50, "القطعة التي فُكّت أو استُبدلت قبل المشكلة");
+            Add(d, Parts.FrontFlex, 45, "حساسات الشاشة الأمامية على خطوط SMC");
+            Add(d, Parts.ChargingFlex, 45, "خطوط الطاقة والحساسات");
+            Add(d, Parts.Board, 45, "SMC أو خطوطه على البوردة");
+            d.Confidence = "منخفضة";
+            d.Summary = anyStrong || anyWeak
+                ? "SMC انهار، والدليل على البطارية ضعيف (مفاتيح بلا قناة معروفة) ← افحص موصلها ثم اختبار العزل قبل شراء أي قطعة."
+                : "SMC انهار والسجل لا يحدد القطعة ← اختبار العزل قبل شراء أي قطعة.";
         }
+
+        // الانهيار بعد مدة قصيرة من الإقلاع: مهلة ثابتة، غالبًا انتظار حساس لا يرد
+        if (d.UptimeSeconds is double up && up is > 0 and <= 1800)
+            d.Evidence.Add(new("توقيت الانهيار", Duration(up) + " من الإقلاع",
+                "إذا تكرر الانهيار بنفس المدة تقريبًا في كل مرة فهو مهلة ثابتة: SMC ينتظر ردًا لا يصل من حساس أو قطعة، وليس عطلًا عشوائيًا. قس المدة في كل تجربة عزل."));
+
+        SmcSteps(d, batteryFocus);
+
+        // نص فشل معروف (SMC BSC failure ...) من قاعدة المعرفة: حالة مؤكدة لموديل محدد تغلب الترتيب
+        if (PanicKnowledge.FindSmcFailure(ps) is not { } f) return;
+        var (choices, specific) = f.LocateFor(d.Product);
+        d.Evidence.Add(new("نوع فشل SMC", f.Match, f.What + " — " + f.Note + (specific ? " (معلومة خاصة بهذا الموديل)" : ""), f.Match));
+        // دليل مباشر في هذا السجل (القناة المتوقفة تقرأ البطارية) يغلب حالة سابقة على نفس الموديل
+        foreach (var c in choices)
+            Add(d, c.Part, batteryFocus ? c.Score - 25 : c.Score, batteryFocus ? c.Why + " — لكن القناة المتوقفة في هذا السجل تقرأ البطارية" : c.Why);
+        if (!specific || batteryFocus) return;
+        d.ModelSpecific = true;
+        d.Confidence = "متوسطة"; // حالة مؤكدة واحدة على نفس الموديل: ترجيح، وليس تأكيدًا قبل العزل
+        d.Signature += "|" + f.Match.Replace(' ', '_');
+        var top = choices.OrderByDescending(c => c.Score).First();
+        d.Explanation += " وعلى هذا الموديل: " + f.Note;
+        d.Summary = $"«{f.Match}» على هذا الموديل ← السبب في حالة مؤكدة سابقة: {top.Part}. أكّده بفصلها قبل التبديل.";
+        d.Steps.InsertRange(1, f.Steps);
+    }
+
+    /// <summary>خطوات فحص SMC: المجاني أولًا (سؤال، عزل، تنظيف)، وتبديل القطع بعد تحديدها فقط</summary>
+    static void SmcSteps(Diagnosis d, bool batteryFocus)
+    {
+        string wait = d.UptimeSeconds is double up && up is > 0 and <= 1800
+            ? $"أطول من مدة الانهيار ({Duration(Math.Max(up * 2, 300))} على الأقل)" : "10 دقائق على الأقل";
+        d.Steps.Add("لا تشترِ أي قطعة قبل اختبار العزل: الاختبار مجاني ويحدد القطعة.");
+        d.Steps.Add("اسأل صاحب الجهاز: هل فُتح أو استُبدلت فيه قطعة (شاشة، بطارية، فلاتة) قبل ظهور المشكلة؟ ابدأ بتلك القطعة.");
+        if (batteryFocus)
+        {
+            d.Steps.Add("افحص صحة البطارية في الإعدادات (رسالة «قطعة غير معروفة» أو «خدمة» تؤكد الاتجاه).");
+            d.Steps.Add("افصل البطارية ونظّف الموصل وأعد تركيبه بإحكام.");
+        }
+        d.Steps.Add($"اختبار العزل: افصل الفلاتات الطرفية واحدة واحدة (حساسات الشاشة وسماعة المكالمات، فلاتة الشحن، ملف الشحن اللاسلكي، الكاميرات) وشغّل الجهاز {wait} في كل مرة. القطعة التي يتوقف الانهيار بفصلها هي السبب.");
+        if (batteryFocus) d.Steps.Add("جرّب بطارية سليمة من المخزون أو مصدر طاقة DC — قبل شراء بطارية جديدة.");
+        else d.Steps.Add("افحص موصل البطارية بصريًا ونظّفه (مجاني)، لكن لا تبدّل البطارية بلا دليل.");
+        d.Steps.Add("بعد تحديد القطعة بالعزل فقط: بدّلها بقطعة سليمة.");
+        d.Steps.Add("إذا بقي الانهيار وكل الفلاتات الطرفية مفصولة: افحص خطوط SMC على البوردة (القياس بوضع الديود ومقارنته بلوحة سليمة).");
     }
 
     // ============================================================== الحساس المفقود
@@ -688,6 +843,7 @@ public static class PanicAnalyzer
             foreach (var p in new[] { Parts.ChargingFlex, Parts.BatteryConn, Parts.Board, Parts.SmcLine }) Bump(d, p, 10, "مع السوائل: افحص التأكسد");
             d.Steps.Insert(0, "لا تشحن الجهاز: افصل البطارية ونظّف البوردة والموصلات بالكحول الأيزوبروبيلي 99% (أو الألتراسونك) قبل أي تبديل.");
         }
+        if (f.BatteryReplaced || f.ScreenReplaced || f.ChargingFlexReplaced) Bump(d, Parts.LastPart, 10, "قطعة استُبدلت قبل المشكلة");
         if (f.BatteryReplaced) Bump(d, Parts.Battery, 15, "البطارية مستبدلة (قد تكون غير أصلية أو ضعيفة التركيب)");
         if (f.BatteryReplaced) Bump(d, Parts.BatteryConn, 8, "فُكّ الموصل عند تبديل البطارية");
         if (f.ChargingFlexReplaced) Bump(d, Parts.ChargingFlex, 15, "فلاتة الشحن مستبدلة (قد تكون تجارية بلا حساس يعمل)");

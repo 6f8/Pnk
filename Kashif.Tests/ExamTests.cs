@@ -74,7 +74,7 @@ static partial class Program
         Check(q3 != null && q3.Id != q1.Id, "السؤال المتخطى لا يعود");
         var smc = PanicAnalyzer.Analyze(PanicParser.Parse(Sample("smc_d94_ocr.txt"), "s"));
         var qs = PanicAnalyzer.NextQuestion(smc, none, new[] { "liquid_seen" }, out _);
-        Check(qs != null && qs.Targets.Contains(Parts.Battery), "في بانك SMC البطارية أولًا: " + qs?.Id);
+        Check(qs != null && qs.Free, "في بانك SMC السؤال الأول مجاني (لا شراء قبل العزل): " + qs?.Id);
         Check(PanicAnalyzer.NextQuestion(new Diagnosis(), none, null, out _) == null, "لا أسئلة بلا أسباب");
     }
 

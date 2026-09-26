@@ -25,6 +25,7 @@ static partial class Program
         Run("الترتيب الزمني والمدة بين البانكات وتغيّر النمط", Chronology);
         Run("قواعد المحل: تعبير منتظم وأولوية وتعارض", RulesAdvanced);
         Run("مفاتيح SMC: القوية والضعيفة", SmcStrongWeak);
+        Run("SMC: القناة المتوقفة لا القنوات السليمة (خطأ iPhone 13 Pro Max)", SmcChannelsRegression);
         Run("تقرير الزبون وأدلة التظليل", CustomerAndNeedles);
         RunExam();
     }
@@ -359,7 +360,8 @@ static partial class Program
     {
         string Smc(string keys) => "panic(cpu 0 caller 0x0): SMC PANIC - ASSERT: target/d94/target.cpp:250: 0\\n" + keys + "\\nDebugger message: panic";
         var strong = PanicAnalyzer.Analyze(PanicParser.Parse(Smc("0x5447304200006013"), "s"));
-        Check(strong.Confidence == "متوسطة" && strong.TopPart == Parts.Battery && strong.Signature.EndsWith("|battery"), "مفتاح مؤكد (TG0B): " + strong.Signature);
+        // بلا قنوات (سجل ناقص) لا يُعرف إن كان المفتاح من القناة المتوقفة أم قراءة دورية: الثقة منخفضة
+        Check(strong.Confidence == "منخفضة" && strong.TopPart == Parts.Battery && strong.Signature.EndsWith("|battery?"), "مفتاح مؤكد بلا قناة (TG0B): " + strong.Signature);
         var weak = PanicAnalyzer.Analyze(PanicParser.Parse(Smc("0x4244443100003013 0x4251583100005013"), "w"));
         Check(weak.Confidence == "منخفضة" && weak.Summary.Contains("ضعيف") && weak.Signature.EndsWith("|b?"), "مفاتيح B غير موثّقة: دليل ضعيف — " + weak.Summary);
         Check(weak.Candidates[0].Score < strong.Candidates[0].Score, "الدليل الضعيف درجته أقل");
@@ -370,13 +372,56 @@ static partial class Program
         Check(real.FaultingTask == "2", "المهمة المتوقفة: " + real.FaultingTask);
     }
 
+    /// <summary>
+    /// حالة حقيقية: iPhone 13 Pro Max ‏«SMC BSC failure». التشخيص الأول قال «البطارية» لأنه قرأ مفاتيح البطارية من القناة السليمة،
+    /// فاستُبدلت البطارية بلا فائدة. السبب كان حساس الشاشة. هذه الاختبارات تمنع تكرار الخطأ.
+    /// </summary>
+    static void SmcChannelsRegression()
+    {
+        var d = PanicAnalyzer.Analyze(PanicParser.Parse(Sample("smc_bsc_d64_screen_sensor.ips"), "d64"));
+        var ch0 = d.SmcChannels.FirstOrDefault(c => c.Index == 0);
+        var ch1 = d.SmcChannels.FirstOrDefault(c => c.Index == 1);
+        Check(ch0 != null && !ch0.NotReady && ch0.Keys.Contains("B0AV"), "القناة 0 سليمة وفيها قراءات البطارية الدورية");
+        Check(ch1 != null && ch1.NotReady && ch1.Keys.SequenceEqual(new[] { "gP13", "gP12", "rBK9", "gP01" }),
+            "القناة 1 متوقفة ومفاتيحها كاملة (gP13 لا يُسقط): " + (ch1 == null ? "-" : string.Join(",", ch1.Keys)));
+        Check(!d.Candidates.Take(2).Any(c => c.Part == Parts.Battery), "البطارية ليست في أول سببين: " + string.Join(" > ", d.Candidates.Select(c => c.Part)));
+        Check(d.Candidates.First(c => c.Part == Parts.Battery).Score < 40, "درجة البطارية منخفضة بلا دليل");
+        Check(d.SensorArray.Contains((1, 0x1000L)), "مصفوفة الحساسات بالست عشري تُقرأ: " + string.Join(",", d.SensorArray));
+        Check(d.Evidence.Any(e => e.What == "علامة إصلاح في السجل") && d.Log.RepairStatus == "3", "repairStatus يُقرأ ويظهر دليلًا");
+        Check(d.Evidence.Any(e => e.What == "توقيت الانهيار"), "توقيت الانهيار الثابت يُذكر");
+        Check(d.Steps.Count > 0 && d.Steps[0].Contains("لا تشترِ"), "أول خطوة: لا شراء قبل العزل");
+        Check(d.Steps.FindIndex(x => x.Contains("اختبار العزل")) < d.Steps.FindIndex(x => x.Contains("بدّلها")), "العزل قبل التبديل");
+        var q = PanicAnalyzer.NextQuestion(d, new List<(string, int)>(), null, out _);
+        Check(q != null && q.Free && q.Id != "battery_swap", "أول سؤال مجاني: " + q?.Id);
+
+        // البطارية سليمة وبقي البانك ← لا تبقى البطارية في المقدمة
+        var after = PanicAnalyzer.Analyze(PanicParser.Parse(Sample("smc_bsc_d64_screen_sensor.ips"), "d64"));
+        PanicAnalyzer.ApplyAnswers(after, new List<(string, int)> { ("battery_swap", 1) });
+        Check(after.TopPart != Parts.Battery && after.TopPart != Parts.BatteryConn, "بعد بطارية سليمة بلا فائدة: " + after.TopPart);
+
+        // القناة المتوقفة فيها قراءة البطارية ← البطارية أولًا (الدليل في المكان الصحيح)
+        const string head = "panic(cpu 0 caller 0x0): SMC PANIC - ASSERT: target/d64/target.cpp:263: 0, SMC BSC failure\n - Misc(2) OUTBOX1 not ready\n";
+        string Box(int i, string msgs, bool stuck) => $"Mailbox ({i}): ({i})\n" + (stuck ? "OUTBOX not ready \n" : "") + msgs + "\n";
+        var bat = PanicAnalyzer.Analyze(PanicParser.Parse(head + Box(0, "[RX] user01 0x0000000110d3de20 0x5456424500003013", false)
+            + Box(1, "[RX] user01 0x000000011124e550 0x5447304200006013", true) + "Debugger message: panic", "b"));
+        Check(bat.TopPart == Parts.Battery && bat.Confidence == "متوسطة", "مفتاح البطارية في القناة المتوقفة: " + bat.TopPart);
+        // البطارية في القناة السليمة فقط ← ليست الأرجح
+        var routine = PanicAnalyzer.Analyze(PanicParser.Parse(head + Box(0, "[RX] user01 0x0000000110d3de20 0x5447304200006013", false)
+            + Box(1, "[RX] user01 0x000000011124e550 0x6750313300040011", true) + "Debugger message: panic", "r"));
+        Check(routine.TopPart != Parts.Battery, "البطارية في القناة السليمة فقط: " + routine.TopPart);
+
+        // تكلفة الأسئلة
+        Check(PanicKnowledge.Current.Questions.First(x => x.Id == "battery_swap").Free == false, "تبديل البطارية يحتاج شراء");
+        Check(PanicKnowledge.Current.Questions.First(x => x.Id == "front_flex_unplug").Free, "فصل الفلاتة مجاني");
+    }
+
     // ------------------------------------------------------------------ 27 + 28
     static void CustomerAndNeedles()
     {
         var raw = Sample("smc_d94_ocr.txt");
         var d = PanicAnalyzer.Analyze(PanicParser.Parse(raw, "smc"));
         var cr = PanicAnalyzer.CustomerReport(d, "محل النور");
-        Check(cr.Contains("محل النور") && cr.Contains("iPhone 16 Pro Max") && cr.Contains(Parts.Battery) && !cr.Contains("0x") && !cr.Contains("SMC"), "تقرير الزبون بسيط بلا رموز");
+        Check(cr.Contains("محل النور") && cr.Contains("iPhone 16 Pro Max") && cr.Contains(d.TopPart) && !cr.Contains("0x") && !cr.Contains("SMC"), "تقرير الزبون بسيط بلا رموز");
         int found = 0, total = 0;
         foreach (var e in d.Evidence.Where(e => !string.IsNullOrEmpty(e.Needle)))
         {

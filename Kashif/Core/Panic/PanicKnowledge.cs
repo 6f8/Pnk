@@ -165,7 +165,7 @@ public static class PanicKnowledge
     /// <summary>جواب في الفحص التفاعلي: أثره على درجة كل قطعة (بالاسم)، وهل هو اختبار حاسم</summary>
     public sealed record AnswerOption(string Label, IReadOnlyDictionary<string, int> Effects, bool Decisive, string Note, bool Add);
     /// <summary>سؤال في الفحص التفاعلي: يُسأل عندما تكون إحدى قطعه المستهدفة بين الأسباب الأعلى</summary>
-    public sealed record Question(string Id, string Text, string Hint, string[] Targets, int Priority, AnswerOption[] Answers, string Source);
+    public sealed record Question(string Id, string Text, string Hint, string[] Targets, int Priority, AnswerOption[] Answers, string Source, bool Free = true);
 
     /// <summary>قاعدة معرفة كاملة مقروءة من ملف</summary>
     public sealed class Base
@@ -335,7 +335,9 @@ public static class PanicKnowledge
                 if (answers.Count < 2) b.Problems.Add($"السؤال {id}: أقل من جوابين");
                 if (b.Questions.Any(q => q.Id == id)) b.Problems.Add($"السؤال {id} مكرر");
                 int pr = e.TryGetProperty("priority", out var pe) && pe.TryGetInt32(out var pv) ? pv : 0;
-                b.Questions.Add(new Question(id, S(e, "text"), S(e, "hint"), targets.ToArray(), pr, answers.ToArray(), S(e, "source")));
+                var cost = S(e, "cost");
+                if (cost is not ("" or "free" or "part")) b.Problems.Add($"السؤال {id}: تكلفة غير معروفة «{cost}» (free أو part)");
+                b.Questions.Add(new Question(id, S(e, "text"), S(e, "hint"), targets.ToArray(), pr, answers.ToArray(), S(e, "source"), cost != "part"));
             }
 
         foreach (var c in b.Services.Select(x => x.Confidence).Concat(b.Signatures.Select(x => x.Confidence)))

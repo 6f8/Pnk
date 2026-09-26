@@ -18,6 +18,9 @@ public sealed class PanicLog
     public string BugType = "", Timestamp = "", OsVersion = "", Product = "", Kernel = "", IncidentId = "", CrashReporterKey = "", SocRevision = "";
     /// <summary>roots_installed من رأس الملف أو «roots installed:» في نص البانك (غير 0 = جهاز معدّل / جيلبريك)</summary>
     public string RootsInstalled = "";
+    /// <summary>repairStatus من رأس الملف: غير صفر يُرجَّح أنه علامة إصلاح أو تبديل قطع سابق (المعنى الدقيق للرقم غير موثّق)</summary>
+    public string RepairStatus = "";
+    public bool Repaired => RepairStatus != "" && RepairStatus != "0";
     /// <summary>السجل يبدو مقطوعًا (لم يُنسخ حتى نهايته)</summary>
     public bool Truncated;
     /// <summary>عدد الأخطاء المصحّحة من النسخ من صورة (O بدل 0 داخل القيم الست عشرية)</summary>
@@ -209,6 +212,7 @@ public static class PanicParser
         Set(ref log.CrashReporterKey, Str("crashReporterKey"));
         Set(ref log.SocRevision, Str("socRevision"));
         Set(ref log.RootsInstalled, Str("roots_installed"));
+        Set(ref log.RepairStatus, Str("repairStatus"));
         Set(ref log.PanicString, Str("panicString"));
         // بعض الإصدارات تضع رقم البناء في «build» بدل os_version
         if (log.OsVersion == "") Set(ref log.OsVersion, Str("build"));
@@ -237,6 +241,7 @@ public static class PanicParser
         Set(ref log.CrashReporterKey, Short("crashReporterKey"));
         Set(ref log.SocRevision, Short("socRevision"));
         Set(ref log.RootsInstalled, Short("roots_installed"));
+        Set(ref log.RepairStatus, Short("repairStatus"));
         if (log.OsVersion == "") Set(ref log.OsVersion, Short("build"));
 
         var ps = ValueOf(text, "panicString", longValue: true);
@@ -382,6 +387,7 @@ public static class PanicParser
         log.CrashReporterKey = Collapse(log.CrashReporterKey).Replace(" ", "");
         log.SocRevision = Collapse(log.SocRevision);
         log.RootsInstalled = Collapse(log.RootsInstalled);
+        log.RepairStatus = Collapse(log.RepairStatus);
         log.PanicString = log.PanicString.Trim();
         if (log.RootsInstalled == "" && RootsLine.Match(log.PanicString) is { Success: true } rl) log.RootsInstalled = rl.Groups[1].Value;
 

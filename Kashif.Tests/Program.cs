@@ -63,8 +63,13 @@ static partial class Program
         foreach (var k in new[] { "TG0B", "B0AV", "BDD1", "BQX1", "BISS", "B0SS", "B0RS" })
             Check(d.SmcKeys.Contains(k), "مفتاح SMC مفقود: " + k + " — وجد: " + string.Join(",", d.SmcKeys));
         Check(!d.SmcKeys.Any(k => k.Contains('?') || k.Contains('+')), "مفاتيح غير صالحة: " + string.Join(",", d.SmcKeys));
-        Check(d.TopPart == Parts.Battery, "الأرجح=" + d.TopPart);
-        Check(d.Candidates.Any(c => c.Part == Parts.BatteryConn), "موصل البطارية ضمن الأسباب");
+        // سطر الفشل يذكر TAOP TAOC (حساسات حرارة) — وليس البطارية. مفاتيح البطارية كانت في القناة السليمة 0 (قراءات دورية).
+        // (كان هذا الاختبار يفرض «البطارية أولًا» بلا تأكيد من المحل — خطأ صُحّح بعد حالة iPhone 13 Pro Max)
+        Check(d.SmcFailedKeys.SequenceEqual(new[] { "TAOP", "TAOC" }), "مفاتيح سطر الفشل: " + string.Join(",", d.SmcFailedKeys));
+        Check(d.SmcChannels.Any(c => c.Index == 1 && c.NotReady) && d.SmcChannels.Any(c => c.Index == 0 && !c.NotReady),
+            "القناة 1 متوقفة والقناة 0 سليمة: " + string.Join(" / ", d.SmcChannels.Select(c => $"{c.Index}:{c.NotReady}")));
+        Check(d.TopPart != Parts.Battery, "البطارية ليست الأرجح بلا دليل: " + d.TopPart);
+        Check(d.Candidates.Any(c => c.Part == Parts.FrontFlex) && d.Confidence == "منخفضة", "حساسات الشاشة ضمن الأسباب والثقة منخفضة");
         Check(d.Evidence.Any(e => e.What == "OUTBOX not ready"), "OUTBOX not ready");
         Check(d.Evidence.Any(e => e.What == "رمز البوردة" && e.Value == "D94"), "رمز البوردة D94");
         Print(d);
