@@ -146,6 +146,18 @@ public static class PanicKnowledge
     }
 
     public sealed record SmcKey(string Key, string Meaning, bool Battery, string Source);
+
+    /// <summary>نص فشل داخل بانك SMC (مثل «SMC BSC failure») ← القطع: لموديل محدد إن وُثّقت حالة مؤكدة، وإلا الافتراضي</summary>
+    public sealed class SmcFailure
+    {
+        public string Match = "", What = "", Note = "", Source = "", Level = "";
+        public Choice[] Default = Array.Empty<Choice>();
+        public Dictionary<string, Choice[]> Models = new(StringComparer.OrdinalIgnoreCase);
+        public string[] Steps = Array.Empty<string>();
+
+        public (Choice[] Choices, bool ModelSpecific) LocateFor(string product) =>
+            !string.IsNullOrEmpty(product) && Models.TryGetValue(product, out var m) ? (m, true) : (Default, false);
+    }
     public sealed record Service(string Name, string What, Choice[] Choices, string[] Steps, string Confidence, string Source, string Level);
     public sealed record Signature(string Kind, string Title, Regex Match, string Explain, Choice[] Choices, string[] Steps, string Confidence, string Source, string Level);
     /// <summary>درايفر (kext) يظهر في مسار الانهيار ← القطع المرتبطة به (دليل ثانوي)</summary>
@@ -161,6 +173,7 @@ public static class PanicKnowledge
         public int Version;
         public List<Sensor> Sensors = new();
         public Dictionary<string, SmcKey> SmcKeys = new(StringComparer.Ordinal);
+        public List<SmcFailure> SmcFailures = new();
         public List<Service> Services = new();
         public List<Signature> Signatures = new();
         public List<Kext> Kexts = new();
@@ -251,6 +264,22 @@ public static class PanicKnowledge
                 b.SmcKeys[k.Key] = k;
             }
 
+        if (root.TryGetProperty("smcFailures", out var failures))
+            foreach (var e in failures.EnumerateArray())
+            {
+                var f = new SmcFailure { Match = S(e, "match"), What = S(e, "what"), Note = S(e, "note"), Source = S(e, "source"), Level = S(e, "level"), Steps = Strings(e, "steps") };
+                if (f.Match.Trim() == "") { b.Problems.Add("فشل SMC: نص المطابقة فارغ"); continue; }
+                f.Default = e.TryGetProperty("default", out var def) ? Choices(def, $"فشل SMC «{f.Match}» (default)") : Array.Empty<Choice>();
+                if (e.TryGetProperty("models", out var models))
+                    foreach (var m in models.EnumerateObject())
+                    {
+                        if (!AppleDevices.IsKnown(m.Name)) b.Problems.Add($"فشل SMC «{f.Match}»: موديل غير معروف «{m.Name}»");
+                        f.Models[m.Name] = Choices(m.Value, $"فشل SMC «{f.Match}» ({m.Name})");
+                    }
+                if (f.Default.Length == 0 && f.Models.Count == 0) b.Problems.Add($"فشل SMC «{f.Match}»: لا توجد أسباب");
+                b.SmcFailures.Add(f);
+            }
+
         if (root.TryGetProperty("services", out var services))
             foreach (var e in services.EnumerateArray())
             {
@@ -313,6 +342,10 @@ public static class PanicKnowledge
             if (c is not ("عالية" or "متوسطة" or "منخفضة")) b.Problems.Add($"درجة ثقة غير صالحة «{c}»");
         return b;
     }
+
+    /// <summary>أول نص فشل SMC معروف يظهر في نص البانك</summary>
+    public static SmcFailure FindSmcFailure(string panicText) =>
+        Current.SmcFailures.FirstOrDefault(f => (panicText ?? "").Contains(f.Match, StringComparison.OrdinalIgnoreCase));
 
     public static Sensor FindSensor(string code) =>
         Current.Sensors.FirstOrDefault(s => s.Code.Equals(code, StringComparison.OrdinalIgnoreCase));

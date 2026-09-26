@@ -138,7 +138,7 @@ public static class PanicAnalyzer
         // ---------- التشخيص الأساسي ----------
         var others = PanicKnowledge.Signatures.Where(s => s.Match.IsMatch(ps)).ToList();
         if (d.MissingSensors.Count > 0) SensorDiagnosis(d, log, ps);
-        else if (smc) SmcDiagnosis(d);
+        else if (smc) SmcDiagnosis(d, ps);
         else if (d.WatchdogService != "" && PanicKnowledge.FindService(d.WatchdogService) is { } svc) ServiceDiagnosis(d, svc);
         else if (others.Count > 0) { SignatureDiagnosis(d, others[0], ps); others.RemoveAt(0); }
         else if (d.WatchdogService != "") UnknownService(d);
@@ -453,7 +453,24 @@ public static class PanicAnalyzer
         return keys;
     }
 
-    static void SmcDiagnosis(Diagnosis d)
+    static void SmcDiagnosis(Diagnosis d, string ps)
+    {
+        SmcDiagnosisByKeys(d);
+        // نص فشل معروف (SMC BSC failure ...): حالة مؤكدة لموديل محدد تغلب ترتيب المفاتيح
+        if (PanicKnowledge.FindSmcFailure(ps) is not { } f) return;
+        var (choices, specific) = f.LocateFor(d.Product);
+        d.Evidence.Add(new("نوع فشل SMC", f.Match, f.What + " — " + f.Note + (specific ? " (معلومة خاصة بهذا الموديل)" : ""), f.Match));
+        foreach (var c in choices) Add(d, c.Part, c.Score, c.Why);
+        if (!specific) return;
+        d.ModelSpecific = true;
+        d.Signature += "|" + f.Match.Replace(' ', '_');
+        var top = choices.OrderByDescending(c => c.Score).First();
+        d.Explanation += " وعلى هذا الموديل: " + f.Note;
+        d.Summary = $"«{f.Match}» على هذا الموديل ← السبب المؤكد في حالة سابقة: {top.Part}، ثم البطارية وموصلها.";
+        d.Steps.InsertRange(0, f.Steps);
+    }
+
+    static void SmcDiagnosisByKeys(Diagnosis d)
     {
         d.Kind = "SMC";
         d.Title = "انهيار معالج الطاقة والحساسات (SMC)";
