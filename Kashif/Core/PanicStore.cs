@@ -11,6 +11,7 @@ public static class PanicStore
         public long Id;
         public string Customer = "", Phone = "", Notes = "", Status = "قيد الفحص", Date = "", FixedPart = "", FixedDate = "";
         public CaseFlags Flags = new();
+        public List<(string Id, int Answer)> Answers = new();
         public List<(string Source, string Raw)> Logs = new();
     }
 
@@ -37,7 +38,8 @@ public static class PanicStore
     }
 
     /// <summary>حفظ تحليل جديد أو تحديث سجل موجود — يعيد رقم السجل</summary>
-    public static long Save(long id, Diagnosis d, IEnumerable<PanicLog> logs, CaseFlags flags, string customer, string phone, string notes, string status, string fixedPart)
+    public static long Save(long id, Diagnosis d, IEnumerable<PanicLog> logs, CaseFlags flags, string customer, string phone, string notes, string status, string fixedPart,
+                            IEnumerable<(string Id, int Answer)> answers = null)
     {
         string fixedDate = "";
         if (id > 0 && (fixedPart ?? "").Trim() != "")
@@ -47,7 +49,7 @@ public static class PanicStore
             if (old.Rows.Count == 1 && Db.S(old.Rows[0]["p"]) == fixedPart.Trim()) fixedDate = Db.S(old.Rows[0]["d"]);
         }
         if (fixedDate == "") fixedDate = Ui.Now;
-        var p = StoreSql.Values(d, logs, flags, customer, phone, notes, status, fixedPart, fixedDate, PanicAnalyzer.Report(d));
+        var p = StoreSql.Values(d, logs, flags, customer, phone, notes, status, fixedPart, fixedDate, PanicAnalyzer.Report(d), answers);
         if (id > 0 && Db.L(Db.Scalar("SELECT COUNT(*) FROM analyses WHERE id=@p0", id)) > 0)
         {
             Db.Exec(StoreSql.Update, p.Append(id).ToArray());
@@ -66,6 +68,7 @@ public static class PanicStore
             Id = id, Customer = Db.S(r["customer"]), Phone = Db.S(r["phone"]), Notes = Db.S(r["notes"]),
             Status = Db.S(r["status"]), Date = Db.S(r["date"]), Flags = CaseFlags.Decode(Db.S(r["flags"])),
             FixedPart = Db.S(r["fixed_part"]), FixedDate = Db.S(r["fixed_date"]), Logs = StoreSql.DecodeLogs(Db.S(r["raw"])),
+            Answers = PanicAnalyzer.DecodeAnswers(Db.S(r["answers"])),
         };
     }
 

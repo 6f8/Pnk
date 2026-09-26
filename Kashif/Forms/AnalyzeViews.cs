@@ -175,6 +175,9 @@ public class VerdictHero : Control
     Diagnosis d;
     List<string> extra = new();
 
+    /// <summary>عرض أعلى 3 أسباب في جهة الرأس (يُطفأ عندما تكون الأسباب ظاهرة بجانبه)</summary>
+    public bool ShowTopCauses { get; set; } = true;
+
     public VerdictHero()
     {
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
@@ -205,7 +208,7 @@ public class VerdictHero : Control
         Gfx.FillRound(g, new RectangleF(r.Right - S(8), r.Y + S(16), S(5), r.Height - S(32)), S(3), accent);
 
         // الجهة الأخرى: أعلى 3 أسباب — فقط إذا كانت الشاشة عريضة بما يكفي
-        bool side = d != null && d.Candidates.Count > 0 && Width >= S(980);
+        bool side = ShowTopCauses && d != null && d.Candidates.Count > 0 && Width >= S(980);
         int sideW = side ? Math.Min(S(420), Width * 36 / 100) : 0;
         int left = (int)r.X + S(24) + (side ? sideW + S(24) : 0);
         int right = (int)r.Right - S(30);
@@ -252,12 +255,13 @@ public class VerdictHero : Control
         Chip("الثقة: " + d.Confidence, ConfColor(d.Confidence), Gfx.Mix(ConfColor(d.Confidence), Color.White, 0.86f));
         Chip(d.Kind, Theme.Brand, Theme.BrandSoft);
         if (!side && d.TopPart != "") Chip("الأرجح: " + d.TopPart, Theme.Danger, Theme.DangerSoft);
+        if (d.AnswersApplied > 0) Chip($"أجوبة الفحص: {d.AnswersApplied}", Theme.Success, Theme.SuccessSoft);
         if (d.ModelSpecific) Chip("معلومة خاصة بالموديل", Theme.Success, Theme.SuccessSoft);
 
         var warns = extra.Concat(d.Warnings).ToList();
         if (warns.Count > 0)
             TextRenderer.DrawText(g, "⚠ " + warns[0] + (warns.Count > 1 ? $"  (+{warns.Count - 1} تنبيه آخر)" : ""), Theme.F(9.5f),
-                new Rectangle(left, Height - S(40), right - left, S(24)), Theme.Warning, Gfx.RtlStart);
+                new Rectangle(left, ShowTopCauses ? Height - S(40) : chipY + S(36), right - left, S(24)), Theme.Warning, Gfx.RtlStart);
 
         if (!side) return;
         // أعلى 3 أسباب بأشرطة
@@ -279,5 +283,207 @@ public class VerdictHero : Control
             Gfx.FillRound(g, new RectangleF(track.Right - fill, track.Y, fill, track.Height), S(3), fg);
             rowY += rowH;
         }
+    }
+}
+
+/// <summary>دليل من السجل كبطاقة: ماذا وُجد، قيمته، ومعناه — النقر يفتح نص السجل مظللًا عند مكانه</summary>
+public class EvidenceCard : StackItem
+{
+    readonly Evidence e;
+    bool hover;
+    public event EventHandler Open;
+
+    public EvidenceCard(Evidence e)
+    {
+        this.e = e;
+        if (!string.IsNullOrEmpty(e.Needle)) Cursor = Cursors.Hand;
+    }
+
+    static int S(int v) => Dpi.S(v);
+    int Inner(int width) => width - S(28);
+
+    public override int Measure(int width) =>
+        S(12) + S(22) + S(4) + TextHeight(Theme.Bidi(e.Value), Theme.F(10), Inner(width)) + (e.Meaning == "" ? 0 : S(4) + TextHeight(e.Meaning, Theme.F(9), Inner(width))) + S(12);
+
+    protected override void OnMouseEnter(EventArgs ev) { hover = true; Invalidate(); base.OnMouseEnter(ev); }
+    protected override void OnMouseLeave(EventArgs ev) { hover = false; Invalidate(); base.OnMouseLeave(ev); }
+    protected override void OnClick(EventArgs ev) { if (!string.IsNullOrEmpty(e.Needle)) Open?.Invoke(this, EventArgs.Empty); base.OnClick(ev); }
+
+    protected override void OnPaint(PaintEventArgs pe)
+    {
+        var g = pe.Graphics;
+        g.Clear(Gfx.OpaqueBack(this));
+        Gfx.Hq(g);
+        var back = e.IsExam ? Theme.SuccessSoft : e.IsInfo ? Theme.Surface : Theme.SurfaceAlt;
+        var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
+        Gfx.FillRound(g, r, S(10), hover && Cursor == Cursors.Hand ? Gfx.Mix(back, Theme.BrandSoft, 0.6f) : back);
+        Gfx.DrawRound(g, r, S(10), e.IsExam ? Gfx.Mix(Theme.Success, Color.White, 0.6f) : Theme.Border);
+        int w = Inner(Width), y = S(12);
+        var titleColor = e.IsExam ? Theme.Success : e.IsInfo ? Theme.Muted : Theme.Brand;
+        TextRenderer.DrawText(g, e.What + (Cursor == Cursors.Hand ? "  ↗" : ""), Theme.FS(9.5f), new Rectangle(S(14), y, w, S(22)), titleColor, Gfx.RtlStart);
+        y += S(22) + S(4);
+        var value = Theme.Bidi(e.Value);
+        int vh = TextHeight(value, Theme.F(10), w);
+        TextRenderer.DrawText(g, value, Theme.F(10), new Rectangle(S(14), y, w, vh), Theme.Ink, Wrap);
+        y += vh + S(4);
+        if (e.Meaning != "") TextRenderer.DrawText(g, e.Meaning, Theme.F(9), new Rectangle(S(14), y, w, Height - y - S(8)), Theme.Muted, Wrap);
+    }
+}
+
+/// <summary>
+/// الفحص التفاعلي: سؤال عن اختبار عملي على الجهاز وأزرار أجوبته. كل جواب يعيد ترتيب الأسباب فورًا.
+/// مرسوم بالكامل (الأزرار مساحات قابلة للنقر) فيبقى حادًا في كل دقة عرض.
+/// </summary>
+public class InterviewView : Control
+{
+    PanicKnowledge.Question q;
+    int remaining, answeredCount;
+    bool confirmed;
+    List<string> answeredLines = new();
+    readonly List<(Rectangle Rect, int Action)> hits = new();
+    int hover = int.MinValue;
+
+    /// <summary>رقم الجواب (0...)، أو -1 تخطي السؤال، -2 تراجع عن آخر جواب، -3 إعادة الفحص من البداية</summary>
+    public event Action<int> Clicked;
+
+    public const int Skip = -1, Undo = -2, Reset = -3;
+
+    public InterviewView()
+    {
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+    }
+
+    public PanicKnowledge.Question Question => q;
+
+    public void Set(PanicKnowledge.Question question, int remainingCount, IEnumerable<string> answered, bool isConfirmed)
+    {
+        q = question;
+        remaining = remainingCount;
+        answeredLines = answered.ToList();
+        answeredCount = answeredLines.Count;
+        confirmed = isConfirmed;
+        Invalidate();
+    }
+
+    static int S(int v) => Dpi.S(v);
+    const TextFormatFlags Wrap = TextFormatFlags.Right | TextFormatFlags.RightToLeft | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.TextBoxControl;
+
+    /// <summary>حساب المواضع (للرسم والنقر وللارتفاع المطلوب) بعرض محدد</summary>
+    int Arrange(int width, Graphics g, bool draw)
+    {
+        hits.Clear();
+        int pad = S(18), inner = width - 2 * pad, right = width - pad, y = pad;
+        void Text(string t, Font f, Color c, int h) { if (draw) TextRenderer.DrawText(g, t, f, new Rectangle(pad, y, inner, h), c, Wrap); }
+        int H(string t, Font f) => string.IsNullOrEmpty(t) ? 0 : TextRenderer.MeasureText(t, f, new Size(inner, int.MaxValue), Wrap).Height;
+
+        // الرأس: العنوان والتقدم، وروابط التراجع والإعادة في نهاية السطر
+        if (draw)
+        {
+            var box = new RectangleF(right - S(26), y, S(26), S(26));
+            Gfx.FillRound(g, box, S(8), Theme.Brand);
+            Icons.Draw(g, "list-checks", box, Color.White, 14);
+            var title = "الفحص التفاعلي" + (q != null ? $"  —  {(answeredCount + 1)} من {answeredCount + remaining}" : "");
+            TextRenderer.DrawText(g, title, Theme.FS(11), new Rectangle(pad, y, inner - S(34), S(26)), Theme.Ink, Gfx.RtlStart);
+        }
+        int lx = pad;
+        void Link(string text, int action)
+        {
+            var f = Theme.FS(9.5f);
+            int w = TextRenderer.MeasureText(text, f, Size.Empty, TextFormatFlags.NoPadding).Width + S(16);
+            var rr = new Rectangle(lx, y, w, S(26));
+            hits.Add((rr, action));
+            if (draw)
+            {
+                if (hover == action) Gfx.FillRound(g, rr, S(8), Theme.BrandSoft);
+                TextRenderer.DrawText(g, text, f, rr, Theme.Brand, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.RightToLeft);
+            }
+            lx += w + S(6);
+        }
+        if (answeredCount > 0) { Link("إعادة الفحص", Reset); Link("تراجع", Undo); }
+        y += S(26) + S(10);
+
+        if (q == null)
+        {
+            var msg = confirmed ? "اكتمل الفحص: التشخيص مؤكد بالفحص العملي." : answeredCount > 0 ? "لا توجد أسئلة أخرى للأسباب الحالية." : "لا توجد أسئلة لهذه الأسباب — اتبع خطوات الفحص.";
+            int mh = H(msg, Theme.FS(11));
+            Text(msg, Theme.FS(11), confirmed ? Theme.Success : Theme.Text2, mh);
+            y += mh + S(8);
+        }
+        else
+        {
+            int qh = H(q.Text, Theme.FS(12));
+            Text(q.Text, Theme.FS(12), Theme.Ink, qh);
+            y += qh + S(6);
+            if (q.Hint != "")
+            {
+                int hh = H(q.Hint, Theme.F(9.5f));
+                Text(q.Hint, Theme.F(9.5f), Theme.Muted, hh);
+                y += hh + S(6);
+            }
+            y += S(6);
+            // أزرار الأجوبة: من بداية السطر (اليمين) وتلتف
+            int x = right, rowH = S(38);
+            var pills = q.Answers.Select((a, i) => (a.Label, i)).Append(("تخطي السؤال", Skip)).ToList();
+            foreach (var (label, action) in pills)
+            {
+                var f = Theme.FS(10);
+                int w = Math.Min(inner, TextRenderer.MeasureText(label, f, Size.Empty, TextFormatFlags.NoPadding).Width + S(36));
+                if (x - w < pad) { x = right; y += rowH + S(8); }
+                var rr = new Rectangle(x - w, y, w, rowH);
+                hits.Add((rr, action));
+                if (draw)
+                {
+                    bool isSkip = action == Skip, h = hover == action;
+                    var fill = isSkip ? (h ? Theme.GraySoft : Theme.Surface) : (h ? Theme.BrandDark : Theme.Brand);
+                    Gfx.FillRound(g, rr, rowH / 2f, fill);
+                    if (isSkip) Gfx.DrawRound(g, rr, rowH / 2f, Theme.BorderStrong);
+                    TextRenderer.DrawText(g, label, f, rr, isSkip ? Theme.Text2 : Color.White, Gfx.Center);
+                }
+                x -= w + S(8);
+            }
+            y += rowH + S(12);
+        }
+
+        // آخر الأجوبة
+        foreach (var line in answeredLines.TakeLast(3))
+        {
+            if (draw) TextRenderer.DrawText(g, "✓ " + line, Theme.F(9), new Rectangle(pad, y, inner, S(20)), Theme.Success, Gfx.RtlStart);
+            y += S(22);
+        }
+        if (answeredLines.Count > 3 && draw)
+            TextRenderer.DrawText(g, $"و{answeredLines.Count - 3} أجوبة أخرى في «الأدلة»", Theme.F(9), new Rectangle(pad, y, inner, S(20)), Theme.Muted, Gfx.RtlStart);
+        if (answeredLines.Count > 3) y += S(22);
+        return y + pad - S(6);
+    }
+
+    /// <summary>الارتفاع المطلوب بعرض محدد</summary>
+    public int Measure(int width) => Arrange(width, null, false);
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.Clear(Gfx.OpaqueBack(this));
+        Gfx.Hq(g);
+        var r = new RectangleF(S(2), 0.5f, Width - S(4), Height - S(3));
+        Gfx.FillRound(g, r, S(14), Gfx.Mix(Theme.BrandSoft, Color.White, 0.35f));
+        Gfx.DrawRound(g, r, S(14), Theme.BrandSoft2);
+        Arrange(Width, g, true);
+    }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        int h = hits.FirstOrDefault(x => x.Rect.Contains(e.Location)) is { Rect.Width: > 0 } hit ? hit.Action : int.MinValue;
+        Cursor = h == int.MinValue ? Cursors.Default : Cursors.Hand;
+        if (h != hover) { hover = h; Invalidate(); }
+        base.OnMouseMove(e);
+    }
+
+    protected override void OnMouseLeave(EventArgs e) { hover = int.MinValue; Invalidate(); base.OnMouseLeave(e); }
+
+    protected override void OnMouseClick(MouseEventArgs e)
+    {
+        var hit = hits.FirstOrDefault(x => x.Rect.Contains(e.Location));
+        if (hit.Rect.Width > 0) Clicked?.Invoke(hit.Action);
+        base.OnMouseClick(e);
     }
 }

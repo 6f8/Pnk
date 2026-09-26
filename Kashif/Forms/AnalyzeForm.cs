@@ -3,55 +3,43 @@ using System.Data;
 namespace Kashif;
 
 /// <summary>
-/// تحليل البانك — الشاشة الرئيسية للبرنامج (F2).
-/// التخطيط: شريط أدوات، رأس خلاصة بعرض الشاشة (مع أعلى 3 أسباب)، شريط «ما حدث للجهاز»،
-/// ثم مساحة العمل: قائمة السجلات (تُطوى) وتبويبات واسعة للأسباب والخطوات والأدلة مع نص السجل والخط الزمني والزبون والتقرير.
+/// تحليل البانك — الشاشة الرئيسية للبرنامج (F2). لوحة من عمودين بلا تبويبات:
+/// العمود الأول: الخلاصة، ثم الفحص التفاعلي (أسئلة عن اختبارات عملية تعيد ترتيب الأسباب)، ثم الأسباب مرتبة.
+/// العمود الثاني: خطوات الفحص، ثم الأدلة من السجل (النقر على الدليل يفتح نص السجل مظللًا عند مكانه).
+/// قائمة السجلات جانبية تُطوى، وبقية التفاصيل (نص السجل، الزبون، التقرير، الخط الزمني، الفحوصات السابقة) في نوافذ عند الطلب.
 /// </summary>
 public class AnalyzeForm : BaseForm
 {
     public const string PageTitle = "تحليل البانك";
     const long MaxFileBytes = 20 * 1024 * 1024;
 
-    // ---------- الإدخال ----------
-    readonly DataGridView logsGrid = Ui.NewGrid(), evidence = Ui.NewGrid(), timeline = Ui.NewGrid(), previous = Ui.NewGrid();
-    readonly RichTextBox raw = new()
-    {
-        Dock = DockStyle.Fill, BorderStyle = BorderStyle.None, WordWrap = false, DetectUrls = false, HideSelection = false,
-        RightToLeft = RightToLeft.No, BackColor = Theme.SurfaceAlt, ForeColor = Theme.Ink, ScrollBars = RichTextBoxScrollBars.Both,
-    };
+    readonly DataGridView logsGrid = Ui.NewGrid();
     readonly Toggle tLiquid = new() { Text = "تعرض لسوائل", Width = 150 }, tBattery = new() { Text = "بطارية مستبدلة", Width = 160 },
         tFlex = new() { Text = "فلاتة شحن مستبدلة", Width = 180 }, tScreen = new() { Text = "شاشة مستبدلة", Width = 150 }, tDrop = new() { Text = "سقوط أو ضربة", Width = 150 };
     readonly Toggle tCombine = new() { Text = "تجميع سجلات الجهاز", Width = 190 };
+    readonly Toggle tAllEvidence = new() { Text = "كل التفاصيل", Width = 130 };
 
-    // ---------- الزبون والنتيجة ----------
-    readonly TextBox customer = new() { Width = 320, PlaceholderText = "اسم الزبون" };
-    readonly TextBox phone = new() { Width = 220, PlaceholderText = "07xx xxx xxxx" };
-    readonly ComboBox status = Ui.Combo(220);
-    readonly ComboBox fixedPart = new() { Width = 420, DropDownStyle = ComboBoxStyle.DropDown, Font = Theme.F(10) };
-    readonly TextBox notes = new() { Width = 780, Height = 90, Multiline = true, ScrollBars = ScrollBars.Vertical, PlaceholderText = "ما وجدته عند الفحص، ما جرّبته، النتيجة..." };
+    readonly VerdictHero verdict = new() { Dock = DockStyle.Top, Height = 204, ShowTopCauses = false };
+    readonly InterviewView interview = new() { Dock = DockStyle.Top, Height = 200 };
+    readonly CardStack causes = new() { Dock = DockStyle.Fill, Padding = new Padding(2), EmptyText = "لا توجد أسباب — افتح سجل بانك" };
+    readonly CardStack steps = new() { Dock = DockStyle.Fill, Padding = new Padding(2), EmptyText = "لا توجد خطوات" };
+    readonly CardStack evidence = new() { Dock = DockStyle.Fill, Padding = new Padding(2), EmptyText = "لا توجد أدلة" };
+    readonly CardPanel logsCard, causesCard, stepsCard, evidenceCard;
+    readonly Panel main;
+    readonly ModernButton bOpen, bPaste, bRaw, bClear, bCustomer, bSave, bReport, bMore, bLogs, bRemove;
+    readonly ContextMenuStrip moreMenu = new() { RightToLeft = RightToLeft.Yes, ShowImageMargin = false };
 
-    // ---------- العرض ----------
-    readonly VerdictHero verdict = new() { Dock = DockStyle.Top, Height = 214 };
-    readonly CardStack causes = new() { Dock = DockStyle.Fill, Padding = new Padding(4), EmptyText = "لا توجد أسباب — افتح سجل بانك" };
-    readonly CardStack steps = new() { Dock = DockStyle.Fill, Padding = new Padding(4), EmptyText = "لا توجد خطوات" };
-    readonly TextBox report = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill, BorderStyle = BorderStyle.None, BackColor = Theme.Surface, ForeColor = Theme.Ink };
-    readonly Toggle tCustomerReport = new() { Text = "تقرير الزبون (مبسّط)", Width = 220 };
-    readonly Label lblPrev = new() { Dock = DockStyle.Top, Height = 34, ForeColor = Theme.Muted, Font = Theme.F(10), TextAlign = ContentAlignment.MiddleLeft, BackColor = Theme.Surface };
-    readonly Label lblTimeline = new() { Dock = DockStyle.Top, Height = 34, ForeColor = Theme.Muted, Font = Theme.F(10), TextAlign = ContentAlignment.MiddleLeft, BackColor = Theme.Surface };
-    readonly Label lblSteps = new() { Dock = DockStyle.Top, Height = 30, ForeColor = Theme.Muted, Font = Theme.F(9.5f), TextAlign = ContentAlignment.MiddleLeft, BackColor = Theme.Surface, Text = "انقر على الخطوة عند إنجازها" };
-    readonly CardPanel logsCard;
-    readonly ModernTabs tabs = new() { Dock = DockStyle.Fill };
-    readonly ModernButton bSave, bCopy, bPrintTech, bPrintCustomer, bRemove, bLogs, bOpen, bPaste, bAnalyze, bClear;
-    ModernButton bCompare;
-
+    // ---------- حالة الفحص ----------
     readonly List<PanicLog> logs = new();
     readonly List<Diagnosis> diags = new();
     readonly HashSet<string> doneSteps = new();
-    List<Evidence> shownEvidence = new();
+    readonly List<(string Id, int Answer)> answers = new();
+    readonly HashSet<string> skipped = new();
+    string customerName = "", phoneText = "", notesText = "", statusText = PanicStore.Statuses[0], fixedPartText = "";
     Diagnosis shown;
     List<PanicLog> shownLogs = new();
     long recordId;
-    bool dirty, loading, busy;
+    bool dirty, loading, busy, logsToggledByUser;
 
     // ---------- فتح الشاشة من أماكن أخرى ----------
     public static void OpenRecord(long id)
@@ -87,36 +75,37 @@ public class AnalyzeForm : BaseForm
         KeyPreview = true;
         AllowDrop = true;
         tCombine.Checked = Settings.On("analyze_combine");
-        status.Items.AddRange(PanicStore.Statuses);
-        status.SelectedIndex = 0;
-        fixedPart.Items.AddRange(Parts.All.OrderBy(p => p).Cast<object>().ToArray());
-        fixedPart.AutoCompleteMode = AutoCompleteMode.SuggestAppend;
-        fixedPart.AutoCompleteSource = AutoCompleteSource.ListItems;
-        try { raw.Font = new Font("Consolas", 10f); } catch { raw.Font = Theme.F(9.5f); }
-        report.Font = Theme.F(10.5f);
 
         // ---------- شريط الأدوات ----------
         var bar = Theme.Bar();
         bOpen = Theme.Btn("فتح ملفات", Theme.Brand, 130, "folder-open");
         bPaste = Theme.Btn("لصق", Theme.Brand, 90, "clipboard-list");
-        bAnalyze = Theme.Btn("تحليل النص", Theme.Success, 130, "scan-line");
+        bRaw = Theme.Btn("نص السجل", Theme.Gray, 120, "scroll-text");
         bClear = Theme.Btn("فحص جديد", Theme.Gray, 120, "plus");
+        bCustomer = Theme.Btn("الزبون والنتيجة", Theme.Gray, 150, "user");
         bSave = Theme.Btn("حفظ في السجل", Theme.Success, 140, "save");
-        bPrintTech = Theme.Btn("طباعة للفني", Theme.Gray, 125, "printer");
-        bPrintCustomer = Theme.Btn("طباعة للزبون", Theme.Gray, 130, "printer");
-        bCopy = Theme.Btn("نسخ التقرير", Theme.Gray, 125, "copy");
+        bReport = Theme.Btn("التقرير", Theme.Gray, 110, "file-text");
+        bMore = Theme.Btn("المزيد", Theme.Gray, 100, "ellipsis");
         bLogs = Theme.Btn("السجلات", Theme.Gray, 110, "panel-right");
         tCombine.Margin = new Padding(12, 8, 6, 2);
-        bar.Controls.AddRange(new Control[] { bOpen, bPaste, bAnalyze, bClear, tCombine, bSave, bPrintTech, bPrintCustomer, bCopy, bLogs });
+        bar.Controls.AddRange(new Control[] { bOpen, bPaste, bRaw, bClear, tCombine, bCustomer, bSave, bReport, bMore, bLogs });
         foreach (var b in bar.Controls.OfType<ModernButton>()) { b.Height = 40; b.Margin = new Padding(4, 3, 4, 3); }
+        moreMenu.Font = Theme.F(10.5f);
+        moreMenu.Items.Add("الخط الزمني للسجلات", null, (s, e) => ShowTimeline());
+        moreMenu.Items.Add("فحوصات سابقة لهذا الجهاز", null, (s, e) => ShowPrevious());
+        moreMenu.Items.Add(new ToolStripSeparator());
+        moreMenu.Items.Add("طباعة تقرير الفني", null, (s, e) => PrintReport(false));
+        moreMenu.Items.Add("طباعة تقرير الزبون", null, (s, e) => PrintReport(true));
+        moreMenu.Items.Add("نسخ تقرير الزبون", null, (s, e) => CopyReport(true));
+        moreMenu.Items.Add("نسخ تقرير الفني", null, (s, e) => CopyReport(false));
 
-        // ---------- ما حدث للجهاز (سطر واحد بعرض الشاشة) ----------
-        var flags = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 48, BackColor = Theme.Bg, WrapContents = false, Padding = new Padding(4, 6, 4, 0) };
+        // ---------- ما حدث للجهاز ----------
+        var flags = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 46, BackColor = Theme.Bg, WrapContents = false, Padding = new Padding(4, 5, 4, 0) };
         flags.Controls.Add(new Label { Text = "ما حدث للجهاز:", AutoSize = false, Width = 130, Height = 34, Font = Theme.FS(10), ForeColor = Theme.Text2, TextAlign = ContentAlignment.MiddleLeft });
         foreach (var t in new[] { tLiquid, tBattery, tFlex, tScreen, tDrop }) { t.Margin = new Padding(6, 0, 14, 0); flags.Controls.Add(t); }
 
         // ---------- قائمة السجلات (جانبية، تُطوى) ----------
-        logsCard = new CardPanel { Dock = DockStyle.Right, Width = 340, Title = "السجلات", IconName = "file-text", Subtitle = "اسحب الملفات إلى هنا" };
+        logsCard = new CardPanel { Dock = DockStyle.Right, Width = 320, Title = "السجلات", IconName = "file-text", Subtitle = "اسحب الملفات إلى هنا", Visible = false };
         bRemove = new ModernButton { Text = "إزالة المحدد", IconName = "trash-2", Kind = BtnKind.Secondary, Height = 36, Dock = DockStyle.Bottom };
         logsCard.Controls.Add(logsGrid);
         logsCard.Controls.Add(new Panel { Dock = DockStyle.Bottom, Height = 8, BackColor = Theme.Surface });
@@ -131,26 +120,42 @@ public class AnalyzeForm : BaseForm
             if (logsGrid.Columns.Contains("السجل")) { logsGrid.Columns["السجل"].FillWeight = 86; logsGrid.Columns["السجل"].MinimumWidth = Dpi.S(120); }
         };
 
-        // ---------- التبويبات ----------
-        FitColumns(evidence, ("الدليل", 18), ("القيمة", 36), ("المعنى", 46));
-        FitColumns(timeline, ("الوقت", 22), ("النوع", 14), ("التشخيص", 34), ("الأرجح", 22), ("المصدر", 8));
-        FitColumns(previous, ("التاريخ", 16), ("التشخيص", 30), ("الأرجح", 20), ("القطعة المُصلِحة", 20), ("الحالة", 14));
-        foreach (var g in new[] { evidence, timeline }) { g.DefaultCellStyle.WrapMode = DataGridViewTriState.True; g.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCells; }
+        // ---------- العمود الأول: الخلاصة، الفحص التفاعلي، الأسباب ----------
+        causesCard = new CardPanel { Dock = DockStyle.Fill, Title = "الأسباب مرتبة", IconName = "list-ordered", Subtitle = "الدرجة للترتيب — تتغير مع أجوبة الفحص" };
+        causesCard.Controls.Add(causes);
+        main = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Margin = new Padding(14, 0, 0, 0) };
+        main.Controls.Add(causesCard);
+        main.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 12, BackColor = Theme.Bg });
+        main.Controls.Add(interview);
+        main.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 12, BackColor = Theme.Bg });
+        main.Controls.Add(verdict);
+        main.Resize += (s, e) => FitInterview();
 
-        tabs.Add("الأسباب مرتبة", Pad(causes), "list-ordered", "الأسباب");
-        var stepsPage = Pad(steps);
-        stepsPage.Controls.Add(lblSteps);
-        tabs.Add("خطوات الفحص", stepsPage, "list-checks", "الخطوات");
-        tabs.Add("الأدلة ونص السجل", EvidencePage(), "search", "الأدلة");
-        var tlPage = Pad(timeline);
-        tlPage.Controls.Add(lblTimeline);
-        tabs.Add("الخط الزمني", tlPage, "history", "الزمن");
-        tabs.Add("الزبون والنتيجة", CustomerPage(), "user", "الزبون");
-        tabs.Add("فحوصات سابقة للجهاز", PreviousPage(), "repeat", "السابقة");
-        tabs.Add("التقرير", ReportPage(), "file-text");
+        // ---------- العمود الثاني: الخطوات، الأدلة ----------
+        stepsCard = new CardPanel { Dock = DockStyle.Fill, Title = "خطوات الفحص", IconName = "list-checks", Subtitle = "انقر على الخطوة عند إنجازها" };
+        stepsCard.Controls.Add(steps);
+        evidenceCard = new CardPanel { Dock = DockStyle.Fill, Title = "الأدلة من السجل", IconName = "search", Subtitle = "انقر على الدليل لترى مكانه في نص السجل" };
+        var evTop = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 38, BackColor = Theme.Surface, WrapContents = false };
+        tAllEvidence.Margin = new Padding(2, 2, 2, 2);
+        evTop.Controls.Add(tAllEvidence);
+        evidenceCard.Controls.Add(evidence);
+        evidenceCard.Controls.Add(evTop);
+        var side = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = Theme.Bg, Margin = new Padding(0) };
+        side.RowStyles.Add(new RowStyle(SizeType.Percent, 44));
+        side.RowStyles.Add(new RowStyle(SizeType.Percent, 56));
+        stepsCard.Margin = new Padding(0, 0, 0, 12);
+        evidenceCard.Margin = new Padding(0);
+        side.Controls.Add(stepsCard, 0, 0);
+        side.Controls.Add(evidenceCard, 0, 1);
+
+        var columns = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = Theme.Bg };
+        columns.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58));
+        columns.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
+        columns.Controls.Add(main, 0, 0);
+        columns.Controls.Add(side, 1, 0);
 
         var work = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
-        work.Controls.Add(tabs);
+        work.Controls.Add(columns);
         work.Controls.Add(new Panel { Dock = DockStyle.Right, Width = 14, BackColor = Theme.Bg });
         work.Controls.Add(logsCard);
 
@@ -158,131 +163,46 @@ public class AnalyzeForm : BaseForm
         Controls.Add(new Panel { Dock = DockStyle.Top, Height = 6 });
         Controls.Add(flags);
         Controls.Add(new Panel { Dock = DockStyle.Top, Height = 8 });
-        Controls.Add(verdict);
-        Controls.Add(new Panel { Dock = DockStyle.Top, Height = 10 });
         Controls.Add(bar);
 
         // ---------- الأحداث ----------
         bOpen.Click += (s, e) => PickFiles();
         bPaste.Click += (s, e) => PasteClipboard();
-        bAnalyze.Click += (s, e) => AnalyzeRawText();
+        bRaw.Click += (s, e) => ShowRaw(null);
         bClear.Click += (s, e) => ClearAll(ask: true);
+        bCustomer.Click += (s, e) => EditCustomer();
         bSave.Click += (s, e) => SaveRecord(silent: false);
-        bCopy.Click += (s, e) => CopyReport();
-        bPrintTech.Click += (s, e) => PrintReport(forCustomer: false);
-        bPrintCustomer.Click += (s, e) => PrintReport(forCustomer: true);
+        bReport.Click += (s, e) => ShowReport();
+        bMore.Click += (s, e) => moreMenu.Show(bMore, new Point(bMore.Width, bMore.Height), ToolStripDropDownDirection.BelowLeft);
+        bLogs.Click += (s, e) => { logsToggledByUser = true; SetLogsVisible(!logsCard.Visible); };
         bRemove.Click += (s, e) => RemoveSelected();
-        bLogs.Click += (s, e) => { logsCard.Visible = !logsCard.Visible; bLogs.Text = logsCard.Visible ? "السجلات" : "إظهار السجلات"; bLogs.Invalidate(); };
         tCombine.CheckedChanged += (s, e) => ShowResult();
-        tCustomerReport.CheckedChanged += (s, e) => FillReport();
+        tAllEvidence.CheckedChanged += (s, e) => FillEvidence();
         foreach (var t in new[] { tLiquid, tBattery, tFlex, tScreen, tDrop }) t.CheckedChanged += (s, e) => { if (!loading) { dirty = true; Reanalyze(); } };
-        foreach (var c in new Control[] { customer, phone, notes, fixedPart }) c.TextChanged += (s, e) => { if (!loading) dirty = true; };
-        status.SelectedIndexChanged += (s, e) => { if (!loading) dirty = true; };
         logsGrid.SelectionChanged += (s, e) => { if (!loading) ShowResult(); };
-        evidence.SelectionChanged += (s, e) => HighlightEvidence();
-        previous.CellDoubleClick += (s, e) => { if (e.RowIndex >= 0) OpenRecord(Db.L(previous.Rows[e.RowIndex].Cells["id"].Value)); };
+        interview.Clicked += OnInterview;
         DragEnter += (s, e) => e.Effect = e.Data.GetDataPresent(DataFormats.FileDrop) || e.Data.GetDataPresent(DataFormats.UnicodeText) ? DragDropEffects.Copy : DragDropEffects.None;
         DragDrop += (s, e) => Drop(e.Data);
-        raw.AllowDrop = true;
-        raw.DragEnter += (s, e) => e.Effect = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
-        raw.DragDrop += (s, e) => Drop(e.Data);
 
         // السجل المحفوظ يُحمَّل عند ظهور الشاشة (بعد ربط الجداول بالنافذة)
         if (rec != null) Load += (s, e) => LoadRecord(rec);
         ShowResult();
     }
 
-    static Panel Pad(Control c)
+    void SetLogsVisible(bool on)
     {
-        var p = new Panel { BackColor = Theme.Surface, Padding = new Padding(10) };
-        c.Dock = DockStyle.Fill;
-        p.Controls.Add(c);
-        return p;
+        logsCard.Visible = on;
+        bLogs.Text = on ? "إخفاء السجلات" : "السجلات";
+        bLogs.FitWidth(110);
+        bLogs.Invalidate();
     }
 
-    Control EvidencePage()
+    void FitInterview()
     {
-        var split = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal, BackColor = Theme.Border, SplitterWidth = 6 };
-        split.Panel1.BackColor = Theme.Surface;
-        split.Panel2.BackColor = Theme.Surface;
-        split.Panel1.Padding = new Padding(8);
-        split.Panel2.Padding = new Padding(8);
-        split.Panel1.Controls.Add(evidence);
-        var hint = new Label { Dock = DockStyle.Top, Height = 28, Text = "نص السجل — اختر دليلًا من الجدول ليُظلَّل مكانه هنا. يمكنك تعديل النص ثم «تحليل النص» (F9).", ForeColor = Theme.Muted, Font = Theme.F(9.5f), TextAlign = ContentAlignment.MiddleLeft, BackColor = Theme.Surface };
-        var rawHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.SurfaceAlt, Padding = new Padding(6) };
-        rawHost.Controls.Add(raw);
-        split.Panel2.Controls.Add(rawHost);
-        split.Panel2.Controls.Add(hint);
-        split.HandleCreated += (s, e) => { try { split.SplitterDistance = Math.Max(Dpi.S(120), split.Height * 45 / 100); } catch { } };
-        return split;
-    }
-
-    Control CustomerPage()
-    {
-        var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, BackColor = Theme.Surface, AutoScroll = true, Padding = new Padding(6, 10, 6, 6) };
-        flow.Controls.Add(Ui.Labeled("الزبون", customer));
-        flow.Controls.Add(Ui.Labeled("الهاتف", phone));
-        flow.Controls.Add(Ui.Labeled("حالة الجهاز", status));
-        flow.SetFlowBreak(flow.Controls[^1], true);
-        flow.Controls.Add(Ui.Labeled("القطعة التي أصلحت الجهاز فعلًا (بعد الإصلاح)", fixedPart));
-        flow.Controls.Add(new Label
-        {
-            Text = "تسجيلها يحسب دقة البرنامج في محلك (التقارير ← دقة التشخيص) ويقترح قواعد جديدة لخبرة المحل.",
-            AutoSize = false, Width = 360, Height = 52, ForeColor = Theme.Muted, Font = Theme.F(9), TextAlign = ContentAlignment.BottomLeft, Margin = new Padding(6, 4, 6, 0),
-        });
-        flow.SetFlowBreak(flow.Controls[^1], true);
-        flow.Controls.Add(Ui.Labeled("ملاحظات الفحص", notes));
-        flow.SetFlowBreak(flow.Controls[^1], true);
-        var b = Theme.Btn("حفظ في السجل", Theme.Success, 160, "save");
-        b.Margin = new Padding(6, 14, 6, 4);
-        b.Click += (s, e) => SaveRecord(silent: false);
-        flow.Controls.Add(b);
-        flow.Controls.Add(new Label
-        {
-            Text = "يُحفظ نص السجلات الأصلي كما هو: عند فتح الفحص لاحقًا يُعاد تحليله بأحدث قاعدة معرفة وخبرة المحل.",
-            AutoSize = false, Width = 560, Height = 44, ForeColor = Theme.Muted, Font = Theme.F(9), TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(6, 14, 6, 0),
-        });
-        return flow;
-    }
-
-    Control PreviousPage()
-    {
-        var page = Pad(previous);
-        var top = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 48, BackColor = Theme.Surface, WrapContents = false };
-        bCompare = Theme.Btn("مقارنة مع الفحص المحدد", Theme.Brand, 210, "arrow-left-right");
-        bCompare.Height = 38;
-        bCompare.Click += (s, e) => CompareSelected();
-        top.Controls.Add(bCompare);
-        page.Controls.Add(lblPrev);
-        page.Controls.Add(top);
-        return page;
-    }
-
-    Control ReportPage()
-    {
-        var page = Pad(report);
-        var top = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 46, BackColor = Theme.Surface, WrapContents = false };
-        tCustomerReport.Margin = new Padding(6, 6, 6, 2);
-        top.Controls.Add(tCustomerReport);
-        page.Controls.Add(top);
-        return page;
-    }
-
-    /// <summary>عرض نسبي للأعمدة يُطبَّق بعد كل ربط</summary>
-    static void FitColumns(DataGridView g, params (string Name, float Weight)[] cols)
-    {
-        g.ScrollBars = ScrollBars.Vertical;
-        g.ShowCellToolTips = true;
-        g.DataBindingComplete += (s, e) =>
-        {
-            foreach (var (name, w) in cols)
-                if (g.Columns.Contains(name))
-                {
-                    var c = g.Columns[name];
-                    c.MinimumWidth = Dpi.S(60);
-                    c.FillWeight = w;
-                }
-        };
+        int h = Math.Max(Dpi.S(120), interview.Measure(Math.Max(Dpi.S(200), main.ClientSize.Width)));
+        // لا يأخذ الفحص التفاعلي أكثر من نصف العمود حتى تبقى الأسباب ظاهرة
+        h = Math.Min(h, Math.Max(Dpi.S(160), main.ClientSize.Height / 2));
+        if (interview.Height != h) interview.Height = h;
     }
 
     // ============================================================== الإدخال
@@ -305,6 +225,7 @@ public class AnalyzeForm : BaseForm
         if (list.Count == 0) return;
         busy = true;
         UpdateButtons();
+        if (!logsCard.Visible) SetLogsVisible(true);
         var progress = new Progress<int>(n => logsCard.Subtitle = $"جارٍ قراءة الملفات: {n} من {list.Count}…");
         (List<PanicLog> Found, List<string> Skipped) result;
         try
@@ -312,7 +233,7 @@ public class AnalyzeForm : BaseForm
             result = await Task.Run(() =>
             {
                 var found = new List<PanicLog>();
-                var skipped = new List<string>();
+                var skippedFiles = new List<string>();
                 IProgress<int> p = progress;
                 for (int i = 0; i < list.Count; i++)
                 {
@@ -321,16 +242,16 @@ public class AnalyzeForm : BaseForm
                     {
                         var info = new FileInfo(f);
                         if (!info.Exists) continue;
-                        if (info.Length > MaxFileBytes) { skipped.Add($"{info.Name}: حجمه أكبر من 20 ميغابايت"); continue; }
+                        if (info.Length > MaxFileBytes) { skippedFiles.Add($"{info.Name}: حجمه أكبر من 20 ميغابايت"); continue; }
                         var text = File.ReadAllText(f, System.Text.Encoding.UTF8);
-                        var logs = PanicParser.ParseMany(text, info.Name);
-                        if (logs.Count == 0) skipped.Add($"{info.Name}: " + (PanicParser.ExplainNonPanic(text, info.Name) ?? "لا يحتوي سجل بانك"));
-                        found.AddRange(logs);
+                        var found1 = PanicParser.ParseMany(text, info.Name);
+                        if (found1.Count == 0) skippedFiles.Add($"{info.Name}: " + (PanicParser.ExplainNonPanic(text, info.Name) ?? "لا يحتوي سجل بانك"));
+                        found.AddRange(found1);
                     }
-                    catch (Exception ex) { skipped.Add($"{Path.GetFileName(f)}: {ex.Message}"); }
+                    catch (Exception ex) { skippedFiles.Add($"{Path.GetFileName(f)}: {ex.Message}"); }
                     p.Report(i + 1);
                 }
-                return (found, skipped);
+                return (found, skippedFiles);
             });
         }
         finally { busy = false; }
@@ -364,6 +285,7 @@ public class AnalyzeForm : BaseForm
         if (dup > 0) Toast.Show($"تُجوهل {dup} سجل مكرر (أُضيف من قبل)", Tone.Info);
         if (logs.Count == before) { Reanalyze(); return; }
         dirty = true;
+        if (!logsToggledByUser && logs.Count > 1 && !logsCard.Visible) SetLogsVisible(true);
         Reanalyze(select: logs.Count - 1);
         if (logs.Count - before > 1) Toast.Show($"أُضيف {logs.Count - before} سجلات");
         if (Settings.On("analyze_autosave") && Session.Can("history")) SaveRecord(silent: true);
@@ -375,7 +297,7 @@ public class AnalyzeForm : BaseForm
         try
         {
             if (Clipboard.ContainsFileDropList()) { AddFiles(Clipboard.GetFileDropList().Cast<string>()); return; }
-            if (!Clipboard.ContainsText()) { Ui.Warn("الحافظة لا تحتوي نصًا. انسخ نص السجل أولًا."); return; }
+            if (!Clipboard.ContainsText()) { Ui.Warn("الحافظة لا تحتوي نصًا. انسخ نص السجل أولًا — أو افتح «نص السجل» والصقه هناك."); return; }
             AddText(Clipboard.GetText(), "نص ملصوق");
         }
         catch (Exception ex) { Ui.Warn("تعذرت قراءة الحافظة: " + ex.Message); }
@@ -388,20 +310,17 @@ public class AnalyzeForm : BaseForm
         else if (data.GetData(DataFormats.UnicodeText) is string text) AddText(text, "نص مسحوب");
     }
 
-    /// <summary>تحليل ما في مربع نص السجل: يستبدل السجل المحدد (بعد تعديله)، أو يضيف سجلًا جديدًا إن لم يكن هناك تحديد</summary>
-    void AnalyzeRawText()
+    /// <summary>نافذة نص السجل: عرض السجل المحدد (مظللًا عند الدليل)، أو لصق/تعديل نص ثم تحليله</summary>
+    void ShowRaw(Evidence focus)
     {
-        if (busy || !Session.Guard("analyze")) return;
-        var text = raw.Text;
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            tabs.SelectedIndex = 2;
-            Ui.Warn("الصق نص السجل في «نص السجل» (تبويب الأدلة) أولًا، أو استخدم «لصق» أو «فتح ملفات».");
-            return;
-        }
         int i = SelectedIndex();
+        var current = i >= 0 ? logs[i].Raw : "";
+        using var dlg = new RawDialog(current, focus?.Needle, i >= 0 ? logs[i].Source : "نص جديد");
+        if (dlg.ShowModal() != DialogResult.OK || !Session.Guard("analyze")) return;
+        var text = dlg.EditedText;
+        if (string.IsNullOrWhiteSpace(text)) return;
         if (i < 0) { AddText(text, "نص ملصوق"); return; }
-        if (logs[i].Raw == PanicParser.Normalize(text)) { Reanalyze(i); return; }
+        if (logs[i].Raw == PanicParser.Normalize(text)) return;
         var found = PanicParser.ParseMany(text, logs[i].Source);
         if (found.Count == 0) { Ui.Warn(PanicParser.ExplainNonPanic(text) ?? "لم يُعثر على سجل بانك في النص بعد التعديل."); return; }
         logs.RemoveAt(i);
@@ -426,11 +345,14 @@ public class AnalyzeForm : BaseForm
         loading = true;
         logs.Clear();
         recordId = 0;
-        customer.Clear(); phone.Clear(); notes.Clear(); fixedPart.Text = "";
-        status.SelectedIndex = 0;
+        customerName = phoneText = notesText = fixedPartText = "";
+        statusText = PanicStore.Statuses[0];
         foreach (var t in new[] { tLiquid, tBattery, tFlex, tScreen, tDrop }) t.Checked = false;
-        raw.Clear();
         doneSteps.Clear();
+        answers.Clear();
+        skipped.Clear();
+        logsToggledByUser = false;
+        SetLogsVisible(false);
         loading = false;
         dirty = false;
         Text = PageTitle;
@@ -441,15 +363,18 @@ public class AnalyzeForm : BaseForm
     {
         loading = true;
         recordId = rec.Id;
-        customer.Text = rec.Customer; phone.Text = rec.Phone; notes.Text = rec.Notes; fixedPart.Text = rec.FixedPart;
-        status.SelectedIndex = Math.Max(0, Array.IndexOf(PanicStore.Statuses, rec.Status));
+        customerName = rec.Customer; phoneText = rec.Phone; notesText = rec.Notes; fixedPartText = rec.FixedPart;
+        statusText = PanicStore.Statuses.Contains(rec.Status) ? rec.Status : PanicStore.Statuses[0];
         tLiquid.Checked = rec.Flags.Liquid; tBattery.Checked = rec.Flags.BatteryReplaced; tFlex.Checked = rec.Flags.ChargingFlexReplaced;
         tScreen.Checked = rec.Flags.ScreenReplaced; tDrop.Checked = rec.Flags.Dropped;
+        answers.AddRange(rec.Answers.Where(a => a.Answer >= 0));
+        foreach (var a in rec.Answers.Where(a => a.Answer < 0)) skipped.Add(a.Id);
         foreach (var (source, text) in rec.Logs)
         {
             var one = PanicParser.Parse(text, source);
             if (!one.IsEmpty) logs.Add(one);
         }
+        if (logs.Count > 1) SetLogsVisible(true);
         loading = false;
         Reanalyze(0);
         dirty = false;
@@ -499,7 +424,10 @@ public class AnalyzeForm : BaseForm
         ShowResult();
     }
 
-    /// <summary>النتيجة المعروضة: تحليل السجل المحدد، أو التحليل المجمّع لكل سجلات نفس الجهاز</summary>
+    /// <summary>
+    /// النتيجة المعروضة: تحليل السجل المحدد (أو المجمّع لكل سجلات نفس الجهاز)، ثم أجوبة الفحص التفاعلي فوقه.
+    /// يُبنى تحليل جديد في كل مرة حتى لا تتراكم الأجوبة على نفس الكائن.
+    /// </summary>
     void ShowResult()
     {
         int i = SelectedIndex();
@@ -507,18 +435,15 @@ public class AnalyzeForm : BaseForm
         {
             shown = null;
             shownLogs = new();
-            if (logs.Count > 0) raw.Clear();
             verdict.Show(null, null);
+            interview.Set(null, 0, Array.Empty<string>(), false);
+            interview.Visible = false;
             causes.SetItems(Array.Empty<StackItem>());
             steps.SetItems(Array.Empty<StackItem>());
-            evidence.DataSource = null; timeline.DataSource = null; previous.DataSource = null;
-            shownEvidence = new();
-            lblPrev.Text = ""; lblTimeline.Text = "";
-            report.Text = "";
+            evidence.SetItems(Array.Empty<StackItem>());
             UpdateButtons();
             return;
         }
-        raw.Text = logs[i].Raw;
         var groups = PanicAnalyzer.GroupDevices(logs);
         var group = Enumerable.Range(0, logs.Count).Where(k => groups[k] == groups[i]).ToList();
         if (tCombine.Checked && group.Count > 1)
@@ -528,9 +453,10 @@ public class AnalyzeForm : BaseForm
         }
         else
         {
-            shown = diags[i];
+            shown = PanicAnalyzer.Analyze(logs[i], Flags(), PanicStore.Rules());
             shownLogs = new List<PanicLog> { logs[i] };
         }
+        PanicAnalyzer.ApplyAnswers(shown, answers);
 
         var extra = new List<string>();
         int devices = groups.Distinct().Count();
@@ -544,82 +470,89 @@ public class AnalyzeForm : BaseForm
         catch { }
         verdict.Show(shown, extra);
 
+        // الفحص التفاعلي
+        var skip = skipped.ToList();
+        if (tLiquid.Checked) skip.Add("liquid_seen");
+        var next = PanicAnalyzer.NextQuestion(shown, answers, skip, out int remaining);
+        var answeredLines = answers.Select(a => PanicKnowledge.Current.Questions.FirstOrDefault(q => q.Id == a.Id) is { } q && a.Answer < q.Answers.Length
+            ? $"{Ui.Cut(q.Text, 60)}{(q.Text.Length > 60 ? "…" : "")} ← {q.Answers[a.Answer].Label}" : null).Where(x => x != null);
+        bool confirmed = shown.Summary.StartsWith("مؤكد بالفحص", StringComparison.Ordinal);
+        interview.Set(next, remaining, answeredLines, confirmed);
+        interview.Visible = shown.Candidates.Count > 0;
+        FitInterview();
+
         causes.SetItems(shown.Candidates.Select((c, k) => (StackItem)new CauseCard(k + 1, c)));
+        causesCard.Subtitle = shown.AnswersApplied > 0 ? $"مرتبة بعد {shown.AnswersApplied} من أجوبة الفحص" : "الدرجة للترتيب — تتغير مع أجوبة الفحص";
         steps.SetItems(shown.Steps.Select((s, k) =>
         {
             var card = new StepCard(k + 1, s, doneSteps.Contains(s));
             card.DoneChanged += (o, e) => { if (card.Done) doneSteps.Add(card.StepText); else doneSteps.Remove(card.StepText); };
             return (StackItem)card;
         }));
-
-        shownEvidence = shown.Evidence.ToList();
-        var et = new DataTable();
-        et.Columns.Add("id", typeof(long));
-        foreach (var c in new[] { "الدليل", "القيمة", "المعنى" }) et.Columns.Add(c);
-        for (int k = 0; k < shownEvidence.Count; k++) et.Rows.Add((long)k, shownEvidence[k].What, shownEvidence[k].Value, shownEvidence[k].Meaning);
-        evidence.DataSource = et;
-
-        var tt = new DataTable();
-        foreach (var c in new[] { "الوقت", "النوع", "التشخيص", "الأرجح", "المصدر" }) tt.Columns.Add(c);
-        var items = shown.Timeline.Count > 0 ? shown.Timeline
-            : new List<TimelineItem> { new(shown.Log?.Time, shown.Time, shown.Kind, shown.Title, shown.TopPart, shown.Signature, shown.Log?.Source ?? "") };
-        foreach (var t in items) tt.Rows.Add(t.TimeText, t.Kind, t.Title, t.TopPart, t.Source);
-        timeline.DataSource = tt;
-        var gap = shown.Evidence.FirstOrDefault(e => e.What == "المدة بين البانكات");
-        lblTimeline.Text = items.Count < 2 ? "سجل واحد — افتح سجلات أخرى لنفس الجهاز لترى تكرار البانك مع الوقت."
-            : gap != null ? $"{items.Count} سجلات — المدة بين البانكات: {gap.Value} — {gap.Meaning}" : $"{items.Count} سجلات مرتبة من الأقدم";
-
-        FillReport();
-        var key = logs[i].DeviceKey;
-        var prev = Session.Can("history") ? PanicStore.Previous(key, recordId) : new DataTable();
-        previous.DataSource = prev;
-        lblPrev.Text = key == "" ? "لا يوجد مفتاح جهاز في السجل لمطابقة الفحوصات السابقة."
-            : prev.Rows.Count == 0 ? "لم يُفحص هذا الجهاز من قبل في المحل." : $"هذا الجهاز فُحص {prev.Rows.Count} مرة من قبل — نقر مزدوج لفتح الفحص، أو قارن معه.";
+        stepsCard.Subtitle = shown.Steps.Count == 0 ? "" : $"{shown.Steps.Count} خطوات — انقر على الخطوة عند إنجازها";
+        FillEvidence();
         UpdateButtons();
     }
 
-    void FillReport()
+    /// <summary>الأدلة الأساسية وأجوبة الفحص — ومعلومات السجل الإضافية عند تفعيل «كل التفاصيل»</summary>
+    void FillEvidence()
     {
-        report.Text = shown == null ? "" : (tCustomerReport.Checked ? PanicAnalyzer.CustomerReport(shown, Settings.Get("shop_name")) : PanicAnalyzer.Report(shown)).Replace("\n", "\r\n");
+        if (shown == null) { evidence.SetItems(Array.Empty<StackItem>()); return; }
+        var list = shown.Evidence.Where(e => tAllEvidence.Checked || !e.IsInfo).ToList();
+        evidence.SetItems(list.Select(e =>
+        {
+            var card = new EvidenceCard(e);
+            card.Open += (s, a) => ShowRaw(e);
+            return (StackItem)card;
+        }));
+        int info = shown.Evidence.Count(e => e.IsInfo);
+        evidenceCard.Subtitle = tAllEvidence.Checked || info == 0 ? "انقر على الدليل لترى مكانه في نص السجل" : $"انقر على الدليل لترى مكانه — و{info} معلومات أخرى في «كل التفاصيل»";
     }
 
-    /// <summary>تظليل مكان الدليل المحدد داخل نص السجل (يُبحث أيضًا بصيغة JSON حيث «/» مكتوبة «\/»)</summary>
-    void HighlightEvidence()
+    void OnInterview(int action)
     {
-        if (evidence.CurrentRow == null || !evidence.Columns.Contains("id")) return;
-        int k = (int)Db.L(evidence.CurrentRow.Cells["id"].Value);
-        if (k < 0 || k >= shownEvidence.Count) return;
-        var needle = shownEvidence[k].Needle;
-        if (string.IsNullOrEmpty(needle) || raw.TextLength == 0) return;
-        var text = raw.Text;
-        int at = text.IndexOf(needle, StringComparison.OrdinalIgnoreCase), len = needle.Length;
-        if (at < 0) { var alt = needle.Replace("/", "\\/"); at = text.IndexOf(alt, StringComparison.OrdinalIgnoreCase); len = alt.Length; }
-        raw.SuspendLayout();
-        raw.SelectAll();
-        raw.SelectionBackColor = raw.BackColor;
-        if (at >= 0)
+        if (shown == null) return;
+        switch (action)
         {
-            raw.Select(at, len);
-            raw.SelectionBackColor = Theme.Amber;
-            raw.ScrollToCaret();
+            case InterviewView.Undo:
+                if (answers.Count > 0) answers.RemoveAt(answers.Count - 1);
+                break;
+            case InterviewView.Reset:
+                if (!Ui.Confirm("إعادة الفحص التفاعلي من البداية؟ تُمسح كل الأجوبة.")) return;
+                answers.Clear();
+                skipped.Clear();
+                break;
+            case InterviewView.Skip:
+                if (interview.Question != null) skipped.Add(interview.Question.Id);
+                break;
+            default:
+                if (interview.Question != null && action >= 0 && action < interview.Question.Answers.Length) answers.Add((interview.Question.Id, action));
+                break;
         }
-        raw.Select(Math.Max(0, at), 0);
-        raw.ResumeLayout();
+        dirty = true;
+        ShowResult();
     }
 
     void UpdateButtons()
     {
-        foreach (var b in new[] { bOpen, bPaste, bAnalyze, bClear }) b.Enabled = !busy;
+        foreach (var b in new[] { bOpen, bPaste, bRaw, bClear }) b.Enabled = !busy;
         bSave.Enabled = !busy && shown != null && Session.Can("history");
-        bCopy.Enabled = shown != null;
-        bPrintTech.Enabled = bPrintCustomer.Enabled = shown != null && Session.Can("print");
+        bReport.Enabled = bCustomer.Enabled = bMore.Enabled = shown != null;
         bRemove.Enabled = !busy && logs.Count > 0;
-        bCompare.Enabled = shown != null && previous.Rows.Count > 0;
         bSave.Text = recordId > 0 ? "تحديث السجل" : "حفظ في السجل";
         bSave.Invalidate();
     }
 
-    // ============================================================== الحفظ والتقرير والمقارنة
+    // ============================================================== الزبون والحفظ والتقارير
+    void EditCustomer()
+    {
+        using var dlg = new CustomerDialog(customerName, phoneText, statusText, fixedPartText, notesText, shown);
+        if (dlg.ShowModal() != DialogResult.OK) return;
+        customerName = dlg.Customer; phoneText = dlg.Phone; statusText = dlg.Status; fixedPartText = dlg.FixedPart; notesText = dlg.Notes;
+        dirty = true;
+        if (dlg.SaveNow) SaveRecord(silent: false);
+    }
+
     void SaveRecord(bool silent)
     {
         if (shown == null) { if (!silent) Ui.Warn("لا يوجد تحليل لحفظه."); return; }
@@ -627,10 +560,11 @@ public class AnalyzeForm : BaseForm
         try
         {
             bool isNew = recordId == 0;
+            var all = answers.Concat(skipped.Select(id => (id, -1))).ToList();
             // السجل الواحد يخص جهازًا واحدًا: تُحفظ سجلات الجهاز المعروض فقط
-            recordId = PanicStore.Save(recordId, shown, shownLogs, Flags(), customer.Text, phone.Text, notes.Text, status.Text, fixedPart.Text);
+            recordId = PanicStore.Save(recordId, shown, shownLogs, Flags(), customerName, phoneText, notesText, statusText, fixedPartText, all);
             if (isNew) Db.Audit("حفظ فحص", $"رقم {recordId}: {shown.Device} — {shown.TopPart}");
-            if (fixedPart.Text.Trim() != "") Db.Audit("نتيجة فحص", $"رقم {recordId}: الأرجح {shown.TopPart} — أُصلح بـ {fixedPart.Text.Trim()}");
+            if (fixedPartText.Trim() != "") Db.Audit("نتيجة فحص", $"رقم {recordId}: الأرجح {shown.TopPart} — أُصلح بـ {fixedPartText.Trim()}");
             dirty = false;
             Text = $"فحص رقم {recordId}";
             UpdateButtons();
@@ -639,33 +573,39 @@ public class AnalyzeForm : BaseForm
         catch (Exception ex) { if (!silent) Ui.Warn("تعذر الحفظ: " + ex.Message); }
     }
 
-    void CopyReport()
+    string ReportText(bool forCustomer) => shown == null ? "" : forCustomer ? PanicAnalyzer.CustomerReport(shown, Settings.Get("shop_name")) : PanicAnalyzer.Report(shown);
+
+    void ShowReport()
     {
         if (shown == null) return;
-        try
-        {
-            Clipboard.SetText(tCustomerReport.Checked ? PanicAnalyzer.CustomerReport(shown, Settings.Get("shop_name")) : PanicAnalyzer.Report(shown));
-            Toast.Show(tCustomerReport.Checked ? "نُسخ تقرير الزبون — الصقه في رسالة" : "نُسخ تقرير الفني");
-        }
+        using var dlg = new ReportDialog(ReportText(false), ReportText(true));
+        dlg.ShowModal();
+        if (dlg.PrintRequest is bool customer) PrintReport(customer);
+    }
+
+    void CopyReport(bool forCustomer)
+    {
+        if (shown == null) return;
+        try { Clipboard.SetText(ReportText(forCustomer)); Toast.Show(forCustomer ? "نُسخ تقرير الزبون — الصقه في رسالة" : "نُسخ تقرير الفني"); }
         catch (Exception ex) { Ui.Warn("تعذر النسخ: " + ex.Message); }
     }
 
-    /// <summary>طباعة تقرير الفني (كل الأسباب والخطوات) أو تقرير الزبون (مبسّط بلا رموز)</summary>
+    /// <summary>طباعة تقرير الفني (كل الأسباب والخطوات وأجوبة الفحص) أو تقرير الزبون (مبسّط بلا رموز)</summary>
     void PrintReport(bool forCustomer)
     {
         if (shown == null || !Session.Guard("print")) return;
         var d = shown;
         var doc = PrintDoc.Header(forCustomer ? "تقرير فحص الجهاز" : "تقرير فحص الجهاز — للفني");
         doc.ForceA4 = true;
-        doc.Pair("الزبون", customer.Text.Trim() == "" ? "—" : customer.Text.Trim(), "الهاتف", phone.Text.Trim() == "" ? "—" : phone.Text.Trim());
+        doc.Pair("الزبون", customerName.Trim() == "" ? "—" : customerName.Trim(), "الهاتف", phoneText.Trim() == "" ? "—" : phoneText.Trim());
         doc.Pair("الجهاز", d.Device == "" ? "غير معروف" : d.Device, "رقم الفحص", recordId > 0 ? recordId.ToString() : "غير محفوظ");
         doc.Line();
         if (forCustomer)
         {
             doc.Text("المشكلة: " + PanicAnalyzer.CustomerProblem(d), 11);
             if (d.TopPart != "") doc.Text("السبب المرجّح: " + d.TopPart + (d.Candidates.Count > 1 ? " (وقد يكون: " + d.Candidates[1].Part + ")" : ""), 11, true);
-            doc.Text("درجة الثقة: " + d.Confidence, 10);
-            if (fixedPart.Text.Trim() != "") doc.Text("ما تم إصلاحه: " + fixedPart.Text.Trim(), 11, true);
+            doc.Text("درجة الثقة: " + d.Confidence + (d.Summary.StartsWith("مؤكد بالفحص", StringComparison.Ordinal) ? " — مؤكد بالفحص العملي" : ""), 10);
+            if (fixedPartText.Trim() != "") doc.Text("ما تم إصلاحه: " + fixedPartText.Trim(), 11, true);
             doc.Space(8);
             doc.Text("التشخيص مبني على سجل الأعطال الذي يحفظه الجهاز، ويُؤكَّد بالفحص العملي قبل تبديل أي قطعة.", 9);
         }
@@ -678,26 +618,68 @@ public class AnalyzeForm : BaseForm
             doc.Space(6);
             doc.Table(new[] { "#", "السبب / القطعة", "الدرجة", "لماذا" }, new[] { 6f, 32, 14, 48 },
                 d.Candidates.Select((c, k) => new[] { (k + 1).ToString(), c.Part, c.Label, c.Why }).ToList());
+            var exam = d.Evidence.Where(e => e.IsExam).ToList();
+            if (exam.Count > 0)
+            {
+                doc.Space(6);
+                doc.Table(new[] { "سؤال الفحص", "الجواب" }, new[] { 60f, 40 }, exam.Select(e => new[] { e.Meaning, e.Value }).ToList());
+            }
             if (d.Steps.Count > 0)
             {
                 doc.Space(6);
                 doc.Table(new[] { "#", "خطوات الفحص", "تم" }, new[] { 6f, 84, 10 }, d.Steps.Select((s, k) => new[] { (k + 1).ToString(), s, doneSteps.Contains(s) ? "✓" : "" }).ToList());
             }
-            if (notes.Text.Trim() != "") { doc.Space(6); doc.Text("ملاحظات الفحص: " + notes.Text.Trim(), 10); }
+            if (notesText.Trim() != "") { doc.Space(6); doc.Text("ملاحظات الفحص: " + notesText.Trim(), 10); }
         }
         doc.Footer();
         doc.Print();
     }
 
-    void CompareSelected()
+    void ShowTimeline()
     {
-        if (shown == null || previous.CurrentRow == null || !previous.Columns.Contains("id")) { Ui.Warn("اختر فحصًا سابقًا من الجدول."); return; }
-        var rec = PanicStore.Load(Db.L(previous.CurrentRow.Cells["id"].Value));
+        if (shown == null) return;
+        var dt = new DataTable();
+        foreach (var c in new[] { "الوقت", "النوع", "التشخيص", "الأرجح", "المصدر" }) dt.Columns.Add(c);
+        var items = shown.Timeline.Count > 0 ? shown.Timeline
+            : new List<TimelineItem> { new(shown.Log?.Time, shown.Time, shown.Kind, shown.Title, shown.TopPart, shown.Signature, shown.Log?.Source ?? "") };
+        foreach (var t in items) dt.Rows.Add(t.TimeText, t.Kind, t.Title, t.TopPart, t.Source);
+        var gap = shown.Evidence.FirstOrDefault(e => e.What == "المدة بين البانكات");
+        var note = items.Count < 2 ? "سجل واحد — افتح سجلات أخرى لنفس الجهاز وفعّل «تجميع سجلات الجهاز» لترى تكرار البانك مع الوقت."
+            : gap != null ? $"{items.Count} سجلات — المدة بين البانكات: {gap.Value} — {gap.Meaning}" : $"{items.Count} سجلات مرتبة من الأقدم";
+        using var dlg = new GridDialog("الخط الزمني للسجلات", "history", dt, note, ("الوقت", 22), ("النوع", 14), ("التشخيص", 34), ("الأرجح", 22), ("المصدر", 8));
+        dlg.ShowModal();
+    }
+
+    void ShowPrevious()
+    {
+        if (shown == null) return;
+        if (!Session.Can("history")) { Ui.Warn("ليس لديك صلاحية سجل الفحوصات."); return; }
+        var key = shown.Log?.DeviceKey ?? "";
+        var prev = PanicStore.Previous(key, recordId);
+        var note = key == "" ? "لا يوجد مفتاح جهاز في السجل لمطابقة الفحوصات السابقة."
+            : prev.Rows.Count == 0 ? "لم يُفحص هذا الجهاز من قبل في المحل." : $"فُحص هذا الجهاز {prev.Rows.Count} مرة من قبل — اختر فحصًا ثم «فتح» أو «مقارنة».";
+        using var dlg = new GridDialog("فحوصات سابقة لهذا الجهاز", "repeat", prev, note, ("التاريخ", 16), ("التشخيص", 30), ("الأرجح", 20), ("القطعة المُصلِحة", 20), ("الحالة", 14));
+        var bOpenRec = dlg.AddButton("فتح الفحص", DialogResult.Yes, BtnKind.Secondary, "eye");
+        var bCmp = dlg.AddButton("مقارنة مع الحالي", DialogResult.Retry, BtnKind.Primary, "arrow-left-right");
+        bOpenRec.Enabled = bCmp.Enabled = prev.Rows.Count > 0;
+        var r = dlg.ShowModal();
+        long id = dlg.SelectedId;
+        if (id <= 0) return;
+        if (r == DialogResult.Yes) OpenRecord(id);
+        else if (r == DialogResult.Retry) Compare(id);
+    }
+
+    void Compare(long id)
+    {
+        var rec = PanicStore.Load(id);
         if (rec == null) return;
         var rules = PanicStore.Rules();
         var ds = rec.Logs.Select(x => PanicParser.Parse(x.Raw, x.Source)).Where(l => !l.IsEmpty).Select(l => PanicAnalyzer.Analyze(l, rec.Flags, rules)).ToList();
         if (ds.Count == 0) { Ui.Warn("الفحص السابق لا يحتوي سجلات قابلة للتحليل."); return; }
-        using var dlg = new CompareDialog(shown, "الفحص الحالي", PanicAnalyzer.Combine(ds), $"فحص رقم {rec.Id} ({Ui.Cut(rec.Date, 10)})", fixedPart.Text.Trim(), rec.FixedPart);
+        var other = PanicAnalyzer.Combine(ds);
+        if (ds.Count == 1) other = PanicAnalyzer.Analyze(ds[0].Log, rec.Flags, rules);
+        PanicAnalyzer.ApplyAnswers(other, rec.Answers.Where(a => a.Answer >= 0).ToList());
+        using var dlg = new CompareDialog(shown, "الفحص الحالي", other, $"فحص رقم {rec.Id} ({Ui.Cut(rec.Date, 10)})", fixedPartText.Trim(), rec.FixedPart);
         dlg.ShowModal();
     }
 
@@ -717,22 +699,177 @@ public class AnalyzeForm : BaseForm
             case Keys.Control | Keys.O: PickFiles(); return true;
             case Keys.Control | Keys.S: SaveRecord(silent: false); return true;
             case Keys.Control | Keys.P: PrintReport(forCustomer: false); return true;
-            case Keys.Control | Keys.V when !raw.Focused && ActiveControl is not TextBoxBase: PasteClipboard(); return true;
-            case Keys.F9: AnalyzeRawText(); return true;
+            case Keys.Control | Keys.V when ActiveControl is not TextBoxBase: PasteClipboard(); return true;
+            case Keys.F9: ShowRaw(null); return true;
         }
         return base.ProcessCmdKey(ref msg, keyData);
+    }
+}
+
+// ============================================================== النوافذ المساعدة
+
+/// <summary>نص السجل: عرض وتعديل، وتظليل مكان دليل محدد</summary>
+public class RawDialog : DialogShell
+{
+    readonly RichTextBox raw = new()
+    {
+        Dock = DockStyle.Fill, BorderStyle = BorderStyle.None, WordWrap = false, DetectUrls = false, HideSelection = false,
+        RightToLeft = RightToLeft.No, BackColor = Theme.SurfaceAlt, ForeColor = Theme.Ink, ScrollBars = RichTextBoxScrollBars.Both,
+    };
+
+    public string EditedText => raw.Text;
+
+    public RawDialog(string text, string needle, string source) : base("نص السجل — " + source, 1100, 760, "scroll-text")
+    {
+        try { raw.Font = new Font("Consolas", 10.5f); } catch { raw.Font = Theme.F(10); }
+        raw.Text = text ?? "";
+        var hint = new Label
+        {
+            Dock = DockStyle.Top, Height = 34, ForeColor = Theme.Muted, Font = Theme.F(9.5f), TextAlign = ContentAlignment.MiddleLeft,
+            Text = string.IsNullOrEmpty(text) ? "الصق نص البانك هنا ثم «تحليل النص»." : "عدّل النص إن لزم ثم «تحليل النص» — أو أغلق النافذة بلا تغيير.",
+        };
+        var host = new Panel { Dock = DockStyle.Fill, BackColor = Theme.SurfaceAlt, Padding = new Padding(8) };
+        host.Controls.Add(raw);
+        Body.Controls.Add(host);
+        Body.Controls.Add(hint);
+        AddButton("إغلاق", DialogResult.Cancel, BtnKind.Secondary, "x");
+        AddButton("تحليل النص", DialogResult.OK, BtnKind.Primary, "scan-line");
+        Shown += (s, e) => { Highlight(needle); raw.Focus(); };
+    }
+
+    /// <summary>يظلّل أول ظهور للنص (يُبحث أيضًا بصيغة JSON حيث «/» مكتوبة «\/»)</summary>
+    void Highlight(string needle)
+    {
+        if (string.IsNullOrEmpty(needle) || raw.TextLength == 0) return;
+        var text = raw.Text;
+        int at = text.IndexOf(needle, StringComparison.OrdinalIgnoreCase), len = needle.Length;
+        if (at < 0) { var alt = needle.Replace("/", "\\/"); at = text.IndexOf(alt, StringComparison.OrdinalIgnoreCase); len = alt.Length; }
+        if (at < 0) { Toast.Show("لم يُعثر على مكان الدليل في النص", Tone.Info); return; }
+        raw.Select(at, len);
+        raw.SelectionBackColor = Theme.Amber;
+        raw.ScrollToCaret();
+    }
+}
+
+/// <summary>بيانات الزبون ونتيجة الإصلاح (القطعة التي أصلحت الجهاز فعلًا تحسب دقة البرنامج وتقترح قواعد جديدة)</summary>
+public class CustomerDialog : DialogShell
+{
+    readonly TextBox customer = new() { Width = 300, PlaceholderText = "اسم الزبون" };
+    readonly TextBox phone = new() { Width = 220, PlaceholderText = "07xx xxx xxxx" };
+    readonly ComboBox status = Ui.Combo(220);
+    readonly ComboBox fixedPart = new() { Width = 540, DropDownStyle = ComboBoxStyle.DropDown, Font = Theme.F(10) };
+    readonly TextBox notes = new() { Width = 760, Height = 100, Multiline = true, ScrollBars = ScrollBars.Vertical, PlaceholderText = "ما وجدته عند الفحص، ما جرّبته، النتيجة..." };
+
+    public string Customer => customer.Text.Trim();
+    public string Phone => phone.Text.Trim();
+    public string Status => status.Text;
+    public string FixedPart => fixedPart.Text.Trim();
+    public string Notes => notes.Text.Trim();
+    public bool SaveNow { get; private set; }
+
+    public CustomerDialog(string c, string p, string st, string fixedText, string n, Diagnosis d) : base("الزبون والنتيجة", 840, 560, "user")
+    {
+        status.Items.AddRange(PanicStore.Statuses);
+        status.SelectedIndex = Math.Max(0, Array.IndexOf(PanicStore.Statuses, st));
+        // الأسباب المقترحة أولًا ثم بقية القطع
+        var suggested = d?.Candidates.Select(x => x.Part).ToList() ?? new List<string>();
+        fixedPart.Items.AddRange(suggested.Concat(Parts.All.Where(x => !suggested.Contains(x)).OrderBy(x => x)).Cast<object>().ToArray());
+        fixedPart.AutoCompleteMode = AutoCompleteMode.SuggestAppend;
+        fixedPart.AutoCompleteSource = AutoCompleteSource.ListItems;
+        customer.Text = c; phone.Text = p; fixedPart.Text = fixedText; notes.Text = n;
+
+        var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, BackColor = Theme.Surface, AutoScroll = true, Padding = new Padding(4, 6, 4, 4) };
+        flow.Controls.Add(Ui.Labeled("الزبون", customer));
+        flow.Controls.Add(Ui.Labeled("الهاتف", phone));
+        flow.Controls.Add(Ui.Labeled("حالة الجهاز", status));
+        flow.SetFlowBreak(flow.Controls[^1], true);
+        flow.Controls.Add(Ui.Labeled("القطعة التي أصلحت الجهاز فعلًا (بعد الإصلاح)", fixedPart));
+        flow.SetFlowBreak(flow.Controls[^1], true);
+        flow.Controls.Add(new Label
+        {
+            Text = "تسجيلها يحسب دقة البرنامج في محلك (التقارير ← دقة التشخيص) ويقترح قواعد جديدة لخبرة المحل.",
+            AutoSize = false, Width = 760, Height = 28, ForeColor = Theme.Muted, Font = Theme.F(9), TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(6, 0, 6, 6),
+        });
+        flow.SetFlowBreak(flow.Controls[^1], true);
+        flow.Controls.Add(Ui.Labeled("ملاحظات الفحص", notes));
+        Body.Controls.Add(flow);
+        AddButton("إلغاء", DialogResult.Cancel, BtnKind.Secondary, "x");
+        AddButton("موافق", DialogResult.OK, BtnKind.Secondary, "check");
+        var save = AddButton("موافق وحفظ في السجل", DialogResult.OK, BtnKind.Primary, "save");
+        save.Click += (s, e) => SaveNow = true;
+        Shown += (s, e) => customer.Focus();
+    }
+}
+
+/// <summary>التقرير: للفني (كل التفاصيل) أو للزبون (مبسّط) — نسخ أو طباعة</summary>
+public class ReportDialog : DialogShell
+{
+    readonly TextBox box = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill, BorderStyle = BorderStyle.None, BackColor = Theme.Surface, ForeColor = Theme.Ink };
+    readonly Toggle tCustomer = new() { Text = "تقرير الزبون (مبسّط)", Width = 220 };
+
+    /// <summary>طلب طباعة بعد الإغلاق: true للزبون، false للفني، null بلا طباعة</summary>
+    public bool? PrintRequest { get; private set; }
+
+    public ReportDialog(string tech, string customer) : base("التقرير", 980, 740, "file-text")
+    {
+        box.Font = Theme.F(10.5f);
+        void Fill() => box.Text = (tCustomer.Checked ? customer : tech).Replace("\n", "\r\n");
+        Fill();
+        tCustomer.CheckedChanged += (s, e) => Fill();
+        var top = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 44, BackColor = Theme.Surface, WrapContents = false };
+        tCustomer.Margin = new Padding(4, 4, 4, 2);
+        top.Controls.Add(tCustomer);
+        var host = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface, Padding = new Padding(4) };
+        host.Controls.Add(box);
+        Body.Controls.Add(host);
+        Body.Controls.Add(top);
+        AddButton("إغلاق", DialogResult.Cancel, BtnKind.Secondary, "x");
+        var copy = AddButton("نسخ", DialogResult.None, BtnKind.Secondary, "copy");
+        copy.Click += (s, e) =>
+        {
+            try { Clipboard.SetText(tCustomer.Checked ? customer : tech); Toast.Show("نُسخ التقرير"); }
+            catch (Exception ex) { Ui.Warn("تعذر النسخ: " + ex.Message); }
+        };
+        var print = AddButton("طباعة", DialogResult.OK, BtnKind.Primary, "printer");
+        print.Click += (s, e) => PrintRequest = tCustomer.Checked;
+    }
+}
+
+/// <summary>جدول في نافذة (الخط الزمني، الفحوصات السابقة) مع ملاحظة، وأزرار يضيفها المستدعي</summary>
+public class GridDialog : DialogShell
+{
+    readonly DataGridView grid = Ui.NewGrid();
+
+    /// <summary>رقم السجل المحدد (إن كان في الجدول عمود id)</summary>
+    public long SelectedId => grid.CurrentRow != null && grid.Columns.Contains("id") ? Db.L(grid.CurrentRow.Cells["id"].Value) : 0;
+
+    public GridDialog(string title, string icon, DataTable data, string note, params (string Name, float Weight)[] cols) : base(title, 1000, 620, icon)
+    {
+        grid.DefaultCellStyle.WrapMode = DataGridViewTriState.True;
+        grid.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCells;
+        grid.ScrollBars = ScrollBars.Vertical;
+        grid.DataBindingComplete += (s, e) =>
+        {
+            foreach (var (name, w) in cols)
+                if (grid.Columns.Contains(name)) { grid.Columns[name].FillWeight = w; grid.Columns[name].MinimumWidth = Dpi.S(60); }
+        };
+        grid.DataSource = data;
+        var lbl = new Label { Dock = DockStyle.Top, Height = 36, Text = note, ForeColor = Theme.Text2, Font = Theme.F(10), TextAlign = ContentAlignment.MiddleLeft };
+        Body.Controls.Add(grid);
+        Body.Controls.Add(lbl);
+        AddButton("إغلاق", DialogResult.Cancel, BtnKind.Secondary, "x");
     }
 }
 
 /// <summary>مقارنة فحصين لنفس الجهاز جنبًا إلى جنب (مثل قبل الإصلاح وبعده)</summary>
 public class CompareDialog : DialogShell
 {
-    public CompareDialog(Diagnosis a, string aTitle, Diagnosis b, string bTitle, string aFixed, string bFixed) : base("مقارنة فحصين", 980, 620, "arrow-left-right")
+    public CompareDialog(Diagnosis a, string aTitle, Diagnosis b, string bTitle, string aFixed, string bFixed) : base("مقارنة فحصين", 1000, 640, "arrow-left-right")
     {
         var grid = Ui.NewGrid();
         grid.DefaultCellStyle.WrapMode = DataGridViewTriState.True;
         grid.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCells;
-        var dt = new System.Data.DataTable();
+        var dt = new DataTable();
         dt.Columns.Add("البند"); dt.Columns.Add(aTitle); dt.Columns.Add(bTitle); dt.Columns.Add("تغيّر؟");
         void Row(string item, string x, string y) => dt.Rows.Add(item, x, y, x == y ? "" : "●");
         string Top(Diagnosis d, int n) => string.Join("\n", d.Candidates.Take(n).Select((c, i) => $"{i + 1}. {c.Part} ({c.Label})"));
@@ -747,6 +884,7 @@ public class CompareDialog : DialogShell
         Row("بصمة النمط", a.Signature, b.Signature);
         Row("الأسباب الأرجح", Top(a, 3), Top(b, 3));
         Row("الثقة", a.Confidence, b.Confidence);
+        Row("أجوبة الفحص", a.AnswersApplied.ToString(), b.AnswersApplied.ToString());
         Row("القطعة المُصلِحة", aFixed, bFixed);
         grid.DataSource = dt;
         grid.DataBindingComplete += (s, e) =>

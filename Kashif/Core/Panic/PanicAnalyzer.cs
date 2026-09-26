@@ -4,6 +4,9 @@ using System.Text.RegularExpressions;
 
 namespace Kashif;
 
+/// <summary>خدمة في قائمة مراقب النظام: عدد مرات التسجيل الناجح خلال المدة، أو توقفها</summary>
+public sealed record ServiceStat(string Name, int Checkins, int Seconds, bool Stopped, int InducedCrashes);
+
 /// <summary>سطر في الخط الزمني لسجلات الجهاز (التحليل المجمّع)</summary>
 public sealed record TimelineItem(DateTimeOffset? Time, string TimeText, string Kind, string Title, string TopPart, string Signature, string Source);
 
@@ -42,6 +45,17 @@ public sealed class Diagnosis
     public int LogCount = 1;
     /// <summary>الخط الزمني للسجلات (في التحليل المجمّع) مرتبًا من الأقدم</summary>
     public List<TimelineItem> Timeline = new();
+    /// <summary>كل خدمات مراقب النظام في السجل: عدد مرات التسجيل وفي كم ثانية، ومن توقف</summary>
+    public List<ServiceStat> Services = new();
+    /// <summary>العملية التي كانت تعمل لحظة الانهيار (Panicked task … pid N: name)</summary>
+    public string PanickedProcess = "";
+    /// <summary>الدرايفرات (kext) في مسار الانهيار، وآخر درايفر بدأ</summary>
+    public List<string> BacktraceKexts = new();
+    public string LastKext = "";
+    /// <summary>المدة من الإقلاع حتى الانهيار (من Epoch Time) بالثواني — null إن لم تُقرأ</summary>
+    public double? UptimeSeconds;
+    /// <summary>أجوبة الفحص التفاعلي المطبّقة على هذا التحليل</summary>
+    public int AnswersApplied;
 
     public string TopPart => Candidates.Count > 0 ? Candidates[0].Part : "";
     public string TopLabel => Candidates.Count > 0 ? Candidates[0].Label : "";
@@ -71,6 +85,23 @@ public static class PanicAnalyzer
     static readonly Regex Hex64 = new(@"0x([0-9a-fA-F]{16})(?![0-9a-fA-F])", RegexOptions.Compiled);
     static readonly Regex RtkitClient = new(@"Client:\s*([A-Za-z0-9_.\-]+)", RegexOptions.Compiled);
     static readonly Regex GenericWatchdog = new(@"\bWDT\b|watchdog timeout", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    static readonly Regex ServiceLine = new(@"service:\s*([A-Za-z0-9_.\-]+)\s*(?:\((\d+)\s+induced crash(?:es)?\))?\s*,\s*(?:total successful checkins in\s+(\d+)\s+seconds\s*:\s*(\d+)|no successful checkins in\s+(\d+)\s+seconds)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    static readonly Regex PanickedTask = new(@"Panicked task\s+0x[0-9a-fA-F]+:[^\n]*?pid\s+(-?\d+)\s*:\s*([^\n,]+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    static readonly Regex KextSection = new(@"Kernel Extensions in backtrace:\s*\n((?:[ \t]*com\.apple\.[^\n]*\n?|[ \t]*dependency:[^\n]*\n?)+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    static readonly Regex KextId = new(@"(com\.apple\.[A-Za-z0-9_.\-]+)", RegexOptions.Compiled);
+    static readonly Regex LastKextRx = new(@"last started kext at \d+:\s*(com\.apple\.[A-Za-z0-9_.\-]+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    static readonly Regex EpochBoot = new(@"Boot\s*:\s*0x([0-9a-fA-F]+)", RegexOptions.Compiled);
+    static readonly Regex EpochCalendar = new(@"Calendar\s*:\s*0x([0-9a-fA-F]+)", RegexOptions.Compiled);
+    static readonly Regex AliveBits = new(@"current\s+([0-9a-fA-F]+)\s*,\s*mask\s+([0-9a-fA-F]+)\s*,\s*expected\s+([0-9a-fA-F]+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    static readonly (string Label, Regex Rx)[] InfoLines =
+    {
+        ("رسالة المصحّح", new(@"Debugger message\s*:\s*([^\n]+)", RegexOptions.Compiled | RegexOptions.IgnoreCase)),
+        ("نوع الإصدار", new(@"OS release type\s*:\s*([^\n]+)", RegexOptions.Compiled | RegexOptions.IgnoreCase)),
+        ("إصدار iBoot", new(@"iBoot version\s*:\s*([^\n]+)", RegexOptions.Compiled | RegexOptions.IgnoreCase)),
+        ("الإقلاع الآمن", new(@"secure boot\?\s*:\s*([^\n]+)", RegexOptions.Compiled | RegexOptions.IgnoreCase)),
+        ("إصدار سجل البانك", new(@"Paniclog version\s*:\s*([^\n]+)", RegexOptions.Compiled | RegexOptions.IgnoreCase)),
+        ("Memory ID", new(@"Memory ID\s*:\s*([^\n]+)", RegexOptions.Compiled | RegexOptions.IgnoreCase)),
+    };
 
     // ============================================================== سجل واحد
     public static Diagnosis Analyze(PanicLog log, CaseFlags flags = null, IEnumerable<CustomRule> custom = null)
@@ -98,6 +129,7 @@ public static class PanicAnalyzer
                 d.Evidence.Add(new("مدة الانتظار", d.WatchdogSeconds + " ثانية", RestartText(d.WatchdogSeconds), "checkins in " + d.WatchdogSeconds));
         }
 
+        ReadDeep(d, ps);
         bool smc = SmcPanic.IsMatch(ps);
         if (smc) ReadSmc(d, ps);
         if (RtkitClient.Match(ps) is { Success: true } rc)
@@ -119,6 +151,10 @@ public static class PanicAnalyzer
             d.Evidence.Add(new("علامة إضافية", s.Title, s.Explain, s.Match.Match(ps).Value));
             foreach (var c in s.Choices) Add(d, c.Part, c.Score - 20, c.Why);
         }
+
+        // ---------- الدرايفرات في مسار الانهيار: دليل ثانوي بدرجة منخفضة ----------
+        foreach (var k in d.BacktraceKexts.Select(PanicKnowledge.FindKext).Where(k => k != null).Distinct())
+            foreach (var c in k.Choices) Add(d, c.Part, c.Score, $"{k.What} ({k.Prefix}) في مسار الانهيار");
 
         // ---------- جهاز معدّل ----------
         if (log.Rooted && d.Candidates.Count > 0)
@@ -202,6 +238,152 @@ public static class PanicAnalyzer
     static string RestartText(int seconds) =>
         seconds is >= 150 and <= 240 ? "يعيد الجهاز التشغيل كل 3 دقائق تقريبًا — النمط المعروف للحساس المفقود"
         : $"يعيد الجهاز التشغيل بعد نحو {Math.Max(1, (int)Math.Round(seconds / 60.0))} دقيقة من الإقلاع";
+
+    // ============================================================== القراءة العميقة
+    /// <summary>
+    /// كل ما في نص البانك مما له معنى: قائمة الخدمات، العملية وقت الانهيار، الدرايفرات في مسار الانهيار،
+    /// المدة من الإقلاع، وأسطر المعلومات (تُعرض في مجموعة «info» ولا تغيّر الترتيب).
+    /// </summary>
+    static void ReadDeep(Diagnosis d, string ps)
+    {
+        foreach (Match m in ServiceLine.Matches(ps))
+        {
+            string name = m.Groups[1].Value;
+            if (d.Services.Any(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase))) continue;
+            int induced = m.Groups[2].Success ? int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture) : 0;
+            bool stopped = m.Groups[5].Success;
+            int seconds = int.Parse(stopped ? m.Groups[5].Value : m.Groups[3].Value, CultureInfo.InvariantCulture);
+            int checkins = stopped ? 0 : int.Parse(m.Groups[4].Value, CultureInfo.InvariantCulture);
+            d.Services.Add(new ServiceStat(name, checkins, seconds, stopped, induced));
+        }
+        if (d.Services.Count > 0)
+        {
+            var stoppedList = d.Services.Where(x => x.Stopped).Select(x => x.Name).ToList();
+            d.Evidence.Add(new("خدمات النظام", $"عددها {d.Services.Count} — المتوقفة: " + (stoppedList.Count == 0 ? "لا شيء" : string.Join("، ", stoppedList)),
+                "كل خدمة تسجّل حضورها كل 10 ثوانٍ تقريبًا؛ المتوقفة هي التي تسببت في إعادة التشغيل — والبقية سليمة", "service:", "info"));
+        }
+        if (PanickedTask.Match(ps) is { Success: true } pt)
+        {
+            d.PanickedProcess = $"{pt.Groups[2].Value.Trim()} (pid {pt.Groups[1].Value})";
+            d.Evidence.Add(new("العملية وقت الانهيار", d.PanickedProcess,
+                pt.Groups[1].Value == "0" ? "kernel_task: الانهيار داخل النواة نفسها أو أحد درايفراتها" : "العملية التي كانت تعمل لحظة الانهيار", "Panicked task", "info"));
+        }
+        if (KextSection.Match(ps) is { Success: true } ks)
+            foreach (Match k in KextId.Matches(ks.Groups[1].Value))
+                if (!d.BacktraceKexts.Contains(k.Groups[1].Value)) d.BacktraceKexts.Add(k.Groups[1].Value);
+        if (d.BacktraceKexts.Count > 0)
+            d.Evidence.Add(new("درايفرات في مسار الانهيار", string.Join("، ", d.BacktraceKexts),
+                string.Join("؛ ", d.BacktraceKexts.Select(k => PanicKnowledge.FindKext(k) is { } x ? $"{k} = {x.What}" : $"{k} = غير معروف في القاعدة")),
+                "Kernel Extensions in backtrace"));
+        if (LastKextRx.Match(ps) is { Success: true } lk)
+        {
+            d.LastKext = lk.Groups[1].Value;
+            d.Evidence.Add(new("آخر درايفر بدأ", d.LastKext, "آخر درايفر حُمّل قبل الانهيار — غالبًا لا علاقة له بالسبب، يُذكر للمقارنة", "last started kext", "info"));
+        }
+        if (EpochBoot.Match(ps) is { Success: true } eb && EpochCalendar.Match(ps) is { Success: true } ec &&
+            long.TryParse(eb.Groups[1].Value, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var boot) &&
+            long.TryParse(ec.Groups[1].Value, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var cal) && cal > boot && cal - boot < 10_000_000)
+        {
+            d.UptimeSeconds = cal - boot;
+            d.Evidence.Add(new("المدة من الإقلاع", Duration(d.UptimeSeconds.Value),
+                d.UptimeSeconds is >= 150 and <= 260 ? "انهار بعد نحو 3 دقائق من الإقلاع — يطابق نمط الحساس المفقود أو الخدمة المتوقفة" : "من Epoch Time: الفرق بين وقت الإقلاع ووقت الانهيار",
+                "Calendar", "info"));
+        }
+        if (AliveBits.Match(ps) is { Success: true } ab)
+            d.Evidence.Add(new("حالة الخدمات (is_alive)", $"current {ab.Groups[1].Value} / expected {ab.Groups[3].Value}",
+                "قيم خام من مراقب النظام: اختلاف current عن expected يعني أن خدمة لم تسجّل حضورها", "is_alive", "info"));
+        foreach (var (label, rx) in InfoLines)
+            if (rx.Match(ps) is { Success: true } im)
+                d.Evidence.Add(new(label, Cut(im.Groups[1].Value.Trim(), 120), "معلومة من السجل", Cut(im.Value, 40), "info"));
+    }
+
+    static string Duration(double seconds) =>
+        seconds < 90 ? Count(seconds, "ثانية", "ثوانٍ") : seconds < 5400 ? Count(seconds / 60, "دقيقة", "دقائق") : seconds < 172800 ? Count(seconds / 3600, "ساعة", "ساعات") : Count(seconds / 86400, "يوم", "أيام");
+
+    /// <summary>عدد مع تمييزه: «3 دقائق» (من 3 إلى 10 جمع)، «2.5 دقيقة»، «15 دقيقة»</summary>
+    static string Count(double value, string one, string many)
+    {
+        var v = Math.Round(value, 1);
+        var text = v.ToString(v == Math.Floor(v) ? "0" : "0.#", CultureInfo.InvariantCulture);
+        return v == Math.Floor(v) && v is >= 3 and <= 10 ? $"{text} {many}" : $"{text} {one}";
+    }
+
+    // ============================================================== الفحص التفاعلي
+    /// <summary>
+    /// تطبيق أجوبة الفني (بالترتيب) على الأسباب: كل جواب يرفع أو يخفض درجات قطع محددة.
+    /// الجواب الحاسم (مثل «ركّبت قطعة سليمة فاختفى البانك») يرفع الثقة إلى «عالية» إذا بقيت قطعته في المقدمة بفارق واضح.
+    /// </summary>
+    public static void ApplyAnswers(Diagnosis d, IReadOnlyList<(string Id, int Answer)> answers)
+    {
+        if (answers == null || answers.Count == 0) return;
+        var decisive = new HashSet<string>();
+        foreach (var (id, idx) in answers)
+        {
+            var q = PanicKnowledge.Current.Questions.FirstOrDefault(x => x.Id == id);
+            if (q == null || idx < 0 || idx >= q.Answers.Length) continue;
+            var a = q.Answers[idx];
+            d.AnswersApplied++;
+            d.Evidence.Add(new("جواب الفحص", a.Label + (a.Note != "" ? " — " + a.Note : ""), q.Text, null, "exam"));
+            foreach (var (part, delta) in a.Effects)
+            {
+                var c = d.Candidates.FirstOrDefault(x => x.Part == part);
+                if (c == null)
+                {
+                    if (delta > 0 && a.Add) d.Candidates.Add(new Candidate { Part = part, Score = Math.Clamp(30 + delta, 1, 99), Why = "من الفحص العملي: " + a.Label });
+                    continue;
+                }
+                c.Score = Math.Clamp(c.Score + delta, 1, 99);
+                c.Why += $" — الفحص: {a.Label} ({(delta > 0 ? "+" : "")}{delta})";
+                if (a.Decisive && delta >= 40) decisive.Add(part);
+                if (delta <= -40) decisive.Remove(part);
+            }
+        }
+        Rank(d);
+        if (d.Candidates.Count == 0) return;
+        bool lead = d.Candidates.Count == 1 || d.Candidates[0].Score - d.Candidates[1].Score >= 20;
+        if (decisive.Contains(d.TopPart) && lead)
+        {
+            d.Confidence = "عالية";
+            d.Summary = $"مؤكد بالفحص العملي ← {d.TopPart}.";
+        }
+        else if (lead && d.Confidence == "منخفضة" && d.AnswersApplied >= 2) d.Confidence = "متوسطة";
+        else if (!lead && d.Confidence == "عالية") d.Confidence = "متوسطة";
+        if (!decisive.Contains(d.TopPart)) d.Summary = $"{d.Summary.TrimEnd('.')} — بعد {d.AnswersApplied} من أجوبة الفحص: الأرجح الآن {d.TopPart}.";
+    }
+
+    /// <summary>
+    /// السؤال التالي: من الأسئلة التي تستهدف إحدى القطع الأعلى (درجة 30 فأكثر، أول 4)، غير المجاب عنها وغير المستبعدة،
+    /// الأعلى أولًا بدرجة قطعته المستهدفة ثم أولوية السؤال. null إذا اكتمل الفحص (تشخيص مؤكد) أو لا يوجد سؤال مناسب.
+    /// </summary>
+    public static PanicKnowledge.Question NextQuestion(Diagnosis d, IReadOnlyList<(string Id, int Answer)> answers, IEnumerable<string> skip, out int remaining)
+    {
+        remaining = 0;
+        if (d == null || d.Candidates.Count == 0) return null;
+        if (d.Confidence == "عالية" && d.Summary.StartsWith("مؤكد بالفحص", StringComparison.Ordinal)) return null;
+        var done = (answers ?? Array.Empty<(string, int)>()).Select(a => a.Id).Concat(skip ?? Array.Empty<string>()).ToHashSet();
+        var top = d.Candidates.Where(c => c.Score >= 30).Take(4).ToList();
+        var ranked = PanicKnowledge.Current.Questions
+            .Where(q => !done.Contains(q.Id) && q.Targets.Any(t => top.Any(c => c.Part == t)))
+            .Select(q => (q, w: top.Where(c => q.Targets.Contains(c.Part)).Max(c => c.Score) + q.Priority * 0.2))
+            .OrderByDescending(x => x.w).ThenBy(x => x.q.Id, StringComparer.Ordinal).ToList();
+        remaining = ranked.Count;
+        return ranked.Count == 0 ? null : ranked[0].q;
+    }
+
+    public static string EncodeAnswers(IEnumerable<(string Id, int Answer)> answers) =>
+        string.Join(";", (answers ?? Array.Empty<(string, int)>()).Select(a => $"{a.Id}={a.Answer.ToString(CultureInfo.InvariantCulture)}"));
+
+    public static List<(string Id, int Answer)> DecodeAnswers(string s)
+    {
+        var list = new List<(string, int)>();
+        foreach (var part in (s ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var kv = part.Split('=');
+            if (kv.Length == 2 && kv[0].Trim() != "" && int.TryParse(kv[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) && list.All(x => x.Item1 != kv[0].Trim()))
+                list.Add((kv[0].Trim(), v));
+        }
+        return list;
+    }
 
     // ============================================================== SMC
     static void ReadSmc(Diagnosis d, string ps)
@@ -699,7 +881,7 @@ public static class PanicAnalyzer
         return d;
     }
 
-    static string Minutes(double m) => m < 1 ? $"{Math.Round(m * 60)} ثانية" : m < 90 ? $"{Math.Round(m, 1)} دقيقة" : $"{Math.Round(m / 60, 1)} ساعة";
+    static string Minutes(double m) => Duration(m * 60);
 
     // ============================================================== التقارير النصية
     /// <summary>تقرير الفني: كل التفاصيل والأدلة (للنسخ أو الحفظ)</summary>
@@ -738,7 +920,14 @@ public static class PanicAnalyzer
         {
             sb.AppendLine();
             sb.AppendLine("الأدلة من السجل:");
-            foreach (var e in d.Evidence) sb.AppendLine($"  • {e.What}: {e.Value}" + (e.What == "سطر الانهيار" || e.Meaning == "" ? "" : $" — {e.Meaning}"));
+            foreach (var e in d.Evidence.Where(e => !e.IsInfo)) sb.AppendLine($"  • {e.What}: {e.Value}" + (e.What == "سطر الانهيار" || e.Meaning == "" ? "" : $" — {e.Meaning}"));
+            var info = d.Evidence.Where(e => e.IsInfo).ToList();
+            if (info.Count > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine("معلومات أخرى من السجل:");
+                foreach (var e in info) sb.AppendLine($"  • {e.What}: {e.Value}");
+            }
         }
         if (d.Warnings.Count > 0)
         {

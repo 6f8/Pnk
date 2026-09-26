@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS kb_rules(id INTEGER PRIMARY KEY, name TEXT NOT NULL, 
         ("analyses", "fixed_part", "TEXT"),       // القطعة التي أصلحت الجهاز فعلًا
         ("analyses", "fixed_date", "TEXT"),
         ("kb_rules", "is_regex", "INTEGER DEFAULT 0"),
+        // الإصدار 3: أجوبة الفحص التفاعلي (id=رقم الجواب;...)
+        ("analyses", "answers", "TEXT"),
         ("kb_rules", "priority", "INTEGER DEFAULT 0"),
     };
 
@@ -51,8 +53,8 @@ CREATE INDEX IF NOT EXISTS ix_audit_date ON audit_log(date);";
 
     // ------------------------------------------------------------------ حفظ وقراءة الفحص
     const string Cols = "customer, phone, device, product, device_key, ios, panic_time, kind, title, top_part, confidence, logs, flags, result, notes, raw, status, " +
-                        "signature, learn_pattern, top3, build, fixed_part, fixed_date";
-    const int ColCount = 23;
+                        "signature, learn_pattern, top3, build, fixed_part, fixed_date, answers";
+    const int ColCount = 24;
 
     public static readonly string Insert =
         $"INSERT INTO analyses({Cols}, date, user_id) VALUES({string.Join(",", Enumerable.Range(0, ColCount + 2).Select(i => "@p" + i))})";
@@ -64,9 +66,9 @@ CREATE INDEX IF NOT EXISTS ix_audit_date ON audit_log(date);";
 
     public static readonly string[] Statuses = { "قيد الفحص", "بانتظار قطعة", "جاهز", "تم التسليم", "لا يصلح" };
 
-    /// <summary>قيم الأعمدة بترتيب Cols (المعاملات @p0 ... @p22)</summary>
+    /// <summary>قيم الأعمدة بترتيب Cols (المعاملات @p0 ... @p23)</summary>
     public static object[] Values(Diagnosis d, IEnumerable<PanicLog> logs, CaseFlags flags, string customer, string phone, string notes, string status,
-                                  string fixedPart, string fixedDate, string report)
+                                  string fixedPart, string fixedDate, string report, IEnumerable<(string Id, int Answer)> answers = null)
     {
         var top3 = string.Join("\n", d.Candidates.Take(3).Select(c => c.Part));
         return new object[]
@@ -75,6 +77,7 @@ CREATE INDEX IF NOT EXISTS ix_audit_date ON audit_log(date);";
             d.Kind, d.Title, d.TopPart, d.Confidence, d.LogCount, (flags ?? new CaseFlags()).Encode(),
             report, (notes ?? "").Trim(), EncodeLogs(logs), Statuses.Contains(status) ? status : Statuses[0],
             d.Signature, d.LearnPattern, top3, d.Build, (fixedPart ?? "").Trim(), (fixedPart ?? "").Trim() == "" ? "" : fixedDate ?? "",
+            PanicAnalyzer.EncodeAnswers(answers),
         };
     }
 

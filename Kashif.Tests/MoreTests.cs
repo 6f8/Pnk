@@ -26,6 +26,7 @@ static partial class Program
         Run("قواعد المحل: تعبير منتظم وأولوية وتعارض", RulesAdvanced);
         Run("مفاتيح SMC: القوية والضعيفة", SmcStrongWeak);
         Run("تقرير الزبون وأدلة التظليل", CustomerAndNeedles);
+        RunExam();
     }
 
     static string ProjectDir()

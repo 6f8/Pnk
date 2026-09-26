@@ -1,5 +1,5 @@
 {
- "version": 2,
+ "version": 3,
  "_readme": "قاعدة معرفة كاشف. part = اسم ثابت من قائمة Parts في الكود. score من 1 إلى 99 للترتيب فقط. level: مؤكد/شائع/محتمل. families: X11 (iPhone X إلى 11) و Later (12 وما بعده) و Early (8 وما قبله و SE) و default. models: رمز موديل محدد (مثل iPhone13,2) يغلب على الجيل — لا تُضاف إلا معلومة مؤكدة.",
  "sensors": [
   {
@@ -843,6 +843,1028 @@
    ],
    "source": "أسماء المعالجات المساعدة في نص البانك (RTKit) + خبرة ورش الصيانة",
    "level": "شائع"
+  }
+ ],
+ "kexts": [
+  {
+   "prefix": "com.apple.driver.AppleBCMWLAN",
+   "what": "درايفر الواي فاي",
+   "choices": [
+    {
+     "part": "Wifi",
+     "score": 50,
+     "why": "درايفر الواي فاي في مسار الانهيار"
+    }
+   ],
+   "source": "أسماء درايفرات Apple (kext) في مسار الانهيار — دليل ثانوي يُضاف بدرجة منخفضة"
+  },
+  {
+   "prefix": "com.apple.iokit.IO80211",
+   "what": "شبكة الواي فاي",
+   "choices": [
+    {
+     "part": "Wifi",
+     "score": 45,
+     "why": "طبقة الواي فاي في مسار الانهيار"
+    }
+   ],
+   "source": "أسماء درايفرات Apple (kext) في مسار الانهيار — دليل ثانوي يُضاف بدرجة منخفضة"
+  },
+  {
+   "prefix": "com.apple.driver.AppleANS",
+   "what": "درايفر الذاكرة الداخلية (ANS)",
+   "choices": [
+    {
+     "part": "Nand",
+     "score": 50,
+     "why": "درايفر الذاكرة الداخلية في مسار الانهيار"
+    }
+   ],
+   "source": "أسماء درايفرات Apple (kext) في مسار الانهيار — دليل ثانوي يُضاف بدرجة منخفضة"
+  },
+  {
+   "prefix": "com.apple.iokit.IONVMe",
+   "what": "درايفر NVMe للذاكرة",
+   "choices": [
+    {
+     "part": "Nand",
+     "score": 50,
+     "why": "درايفر الذاكرة في مسار الانهيار"
+    }
+   ],
+   "source": "أسماء درايفرات Apple (kext) في مسار الانهيار — دليل ثانوي يُضاف بدرجة منخفضة"
+  },
+  {
+   "prefix": "com.apple.driver.AppleSEP",
+   "what": "درايفر المعالج الآمن",
+   "choices": [
+    {
+     "part": "Biometric",
+     "score": 40,
+     "why": "المعالج الآمن في مسار الانهيار"
+    },
+    {
+     "part": "Board",
+     "score": 35,
+     "why": "المعالج الآمن على البوردة"
+    }
+   ],
+   "source": "أسماء درايفرات Apple (kext) في مسار الانهيار — دليل ثانوي يُضاف بدرجة منخفضة"
+  },
+  {
+   "prefix": "com.apple.driver.AppleMesa",
+   "what": "درايفر البصمة",
+   "choices": [
+    {
+     "part": "TouchId",
+     "score": 50,
+     "why": "درايفر البصمة في مسار الانهيار"
+    }
+   ],
+   "source": "أسماء درايفرات Apple (kext) في مسار الانهيار — دليل ثانوي يُضاف بدرجة منخفضة"
+  },
+  {
+   "prefix": "com.apple.driver.AppleH",
+   "what": "درايفر الكاميرا (ISP)",
+   "choices": [
+    {
+     "part": "Camera",
+     "score": 45,
+     "why": "درايفر الكاميرا في مسار الانهيار"
+    }
+   ],
+   "source": "أسماء درايفرات Apple (kext) في مسار الانهيار — دليل ثانوي يُضاف بدرجة منخفضة"
+  },
+  {
+   "prefix": "com.apple.driver.AppleCamIn",
+   "what": "درايفر الكاميرا",
+   "choices": [
+    {
+     "part": "Camera",
+     "score": 45,
+     "why": "درايفر الكاميرا في مسار الانهيار"
+    }
+   ],
+   "source": "أسماء درايفرات Apple (kext) في مسار الانهيار — دليل ثانوي يُضاف بدرجة منخفضة"
+  },
+  {
+   "prefix": "com.apple.driver.AppleDCP",
+   "what": "درايفر معالج العرض",
+   "choices": [
+    {
+     "part": "Screen",
+     "score": 45,
+     "why": "درايفر العرض في مسار الانهيار"
+    }
+   ],
+   "source": "أسماء درايفرات Apple (kext) في مسار الانهيار — دليل ثانوي يُضاف بدرجة منخفضة"
+  },
+  {
+   "prefix": "com.apple.driver.AppleMultitouch",
+   "what": "درايفر اللمس",
+   "choices": [
+    {
+     "part": "Screen",
+     "score": 45,
+     "why": "درايفر اللمس في مسار الانهيار"
+    }
+   ],
+   "source": "أسماء درايفرات Apple (kext) في مسار الانهيار — دليل ثانوي يُضاف بدرجة منخفضة"
+  },
+  {
+   "prefix": "com.apple.driver.AppleHPM",
+   "what": "متحكم منفذ الشحن (HPM)",
+   "choices": [
+    {
+     "part": "ChargeIc",
+     "score": 45,
+     "why": "متحكم منفذ الشحن في مسار الانهيار"
+    },
+    {
+     "part": "ChargingFlex",
+     "score": 35,
+     "why": "منفذ الشحن"
+    }
+   ],
+   "source": "أسماء درايفرات Apple (kext) في مسار الانهيار — دليل ثانوي يُضاف بدرجة منخفضة"
+  },
+  {
+   "prefix": "com.apple.driver.AppleTriStar",
+   "what": "آيسي الشحن Tristar",
+   "choices": [
+    {
+     "part": "ChargeIc",
+     "score": 45,
+     "why": "آيسي الشحن في مسار الانهيار"
+    },
+    {
+     "part": "ChargingFlex",
+     "score": 35,
+     "why": "منفذ الشحن"
+    }
+   ],
+   "source": "أسماء درايفرات Apple (kext) في مسار الانهيار — دليل ثانوي يُضاف بدرجة منخفضة"
+  },
+  {
+   "prefix": "com.apple.driver.AppleSMC",
+   "what": "درايفر SMC",
+   "choices": [
+    {
+     "part": "SmcLine",
+     "score": 40,
+     "why": "درايفر SMC في مسار الانهيار"
+    },
+    {
+     "part": "Battery",
+     "score": 35,
+     "why": "SMC يدير البطارية"
+    }
+   ],
+   "source": "أسماء درايفرات Apple (kext) في مسار الانهيار — دليل ثانوي يُضاف بدرجة منخفضة"
+  },
+  {
+   "prefix": "com.apple.driver.AppleSPU",
+   "what": "معالج الحساسات (SPU/AOP)",
+   "choices": [
+    {
+     "part": "Sensors",
+     "score": 40,
+     "why": "معالج الحساسات في مسار الانهيار"
+    },
+    {
+     "part": "FrontFlex",
+     "score": 35,
+     "why": "حساسات الجهة الأمامية"
+    }
+   ],
+   "source": "أسماء درايفرات Apple (kext) في مسار الانهيار — دليل ثانوي يُضاف بدرجة منخفضة"
+  },
+  {
+   "prefix": "com.apple.driver.AppleAOP",
+   "what": "المعالج دائم التشغيل (AOP)",
+   "choices": [
+    {
+     "part": "Sensors",
+     "score": 40,
+     "why": "معالج الحساسات في مسار الانهيار"
+    },
+    {
+     "part": "FrontFlex",
+     "score": 35,
+     "why": "حساسات الجهة الأمامية"
+    }
+   ],
+   "source": "أسماء درايفرات Apple (kext) في مسار الانهيار — دليل ثانوي يُضاف بدرجة منخفضة"
+  },
+  {
+   "prefix": "com.apple.driver.AppleConvergedIPC",
+   "what": "اتصال البيسباند",
+   "choices": [
+    {
+     "part": "Baseband",
+     "score": 45,
+     "why": "درايفر البيسباند في مسار الانهيار"
+    }
+   ],
+   "source": "أسماء درايفرات Apple (kext) في مسار الانهيار — دليل ثانوي يُضاف بدرجة منخفضة"
+  },
+  {
+   "prefix": "com.apple.driver.AppleBaseband",
+   "what": "درايفر البيسباند",
+   "choices": [
+    {
+     "part": "Baseband",
+     "score": 45,
+     "why": "درايفر البيسباند في مسار الانهيار"
+    }
+   ],
+   "source": "أسماء درايفرات Apple (kext) في مسار الانهيار — دليل ثانوي يُضاف بدرجة منخفضة"
+  },
+  {
+   "prefix": "com.apple.AGX",
+   "what": "درايفر الرسوميات",
+   "choices": [
+    {
+     "part": "Ios",
+     "score": 40,
+     "why": "غالبًا تطبيق أو تحديث"
+    },
+    {
+     "part": "SocRam",
+     "score": 30,
+     "why": "المعالج"
+    }
+   ],
+   "source": "أسماء درايفرات Apple (kext) في مسار الانهيار — دليل ثانوي يُضاف بدرجة منخفضة"
+  },
+  {
+   "prefix": "com.apple.driver.AppleAVE",
+   "what": "مشفّر الفيديو",
+   "choices": [
+    {
+     "part": "Ios",
+     "score": 40,
+     "why": "غالبًا تطبيق أو تحديث"
+    }
+   ],
+   "source": "أسماء درايفرات Apple (kext) في مسار الانهيار — دليل ثانوي يُضاف بدرجة منخفضة"
+  },
+  {
+   "prefix": "com.apple.driver.AppleSPMI",
+   "what": "خط الطاقة SPMI",
+   "choices": [
+    {
+     "part": "Pmu",
+     "score": 45,
+     "why": "خط آيسي الطاقة في مسار الانهيار"
+    },
+    {
+     "part": "Battery",
+     "score": 30,
+     "why": "جهد غير مستقر"
+    }
+   ],
+   "source": "أسماء درايفرات Apple (kext) في مسار الانهيار — دليل ثانوي يُضاف بدرجة منخفضة"
+  },
+  {
+   "prefix": "com.apple.driver.AppleDialogPMU",
+   "what": "آيسي الطاقة PMU",
+   "choices": [
+    {
+     "part": "Pmu",
+     "score": 45,
+     "why": "آيسي الطاقة في مسار الانهيار"
+    },
+    {
+     "part": "Battery",
+     "score": 30,
+     "why": "جهد غير مستقر"
+    }
+   ],
+   "source": "أسماء درايفرات Apple (kext) في مسار الانهيار — دليل ثانوي يُضاف بدرجة منخفضة"
+  },
+  {
+   "prefix": "com.apple.driver.AppleCS",
+   "what": "آيسي الصوت (Cirrus)",
+   "choices": [
+    {
+     "part": "AudioIc",
+     "score": 45,
+     "why": "آيسي الصوت في مسار الانهيار"
+    },
+    {
+     "part": "AudioParts",
+     "score": 30,
+     "why": "سماعة أو ميكروفون"
+    }
+   ],
+   "source": "أسماء درايفرات Apple (kext) في مسار الانهيار — دليل ثانوي يُضاف بدرجة منخفضة"
+  }
+ ],
+ "questions": [
+  {
+   "id": "liquid_seen",
+   "text": "عند فتح الجهاز: هل يوجد تأكسد أو آثار سوائل على البوردة أو الموصلات؟",
+   "targets": [
+    "ChargingFlex",
+    "BatteryConn",
+    "Board",
+    "SmcLine",
+    "Liquid",
+    "Battery"
+   ],
+   "priority": 90,
+   "hint": "افحص بالمجهر حول موصلات البطارية والشحن والشاشة.",
+   "answers": [
+    {
+     "label": "نعم، يوجد تأكسد",
+     "effects": {
+      "Liquid": 60,
+      "BatteryConn": 10,
+      "ChargingFlex": 10,
+      "Board": 10
+     },
+     "decisive": false,
+     "note": "تأكسد مرئي",
+     "add": true
+    },
+    {
+     "label": "لا، نظيف",
+     "effects": {
+      "Liquid": -40
+     },
+     "decisive": false,
+     "note": "",
+     "add": false
+    },
+    {
+     "label": "لم أفتح الجهاز بعد",
+     "effects": {},
+     "decisive": false,
+     "note": "",
+     "add": false
+    }
+   ],
+   "source": "اختبارات الفحص العملي المعتادة في ورش الصيانة"
+  },
+  {
+   "id": "flex_swap",
+   "text": "ركّبت فلاتة شحن سليمة (أو فصلت الحالية وشغّلت الجهاز): هل اختفى البانك؟",
+   "targets": [
+    "ChargingFlex"
+   ],
+   "priority": 80,
+   "hint": "مع الفلاتة مفصولة يظهر نفس رمز الحساس في البانك إذا كانت هي مساره.",
+   "answers": [
+    {
+     "label": "اختفى البانك",
+     "effects": {
+      "ChargingFlex": 45,
+      "Board": -20
+     },
+     "decisive": true,
+     "note": "الفلاتة السليمة أنهت البانك",
+     "add": false
+    },
+    {
+     "label": "بقي نفس البانك",
+     "effects": {
+      "ChargingFlex": -50,
+      "Board": 25,
+      "LastPart": 10
+     },
+     "decisive": false,
+     "note": "البانك مستمر مع فلاتة سليمة",
+     "add": false
+    },
+    {
+     "label": "لم أجرّب",
+     "effects": {},
+     "decisive": false,
+     "note": "",
+     "add": false
+    }
+   ],
+   "source": "اختبارات الفحص العملي المعتادة في ورش الصيانة"
+  },
+  {
+   "id": "battery_swap",
+   "text": "جرّبت بطارية سليمة (أو مصدر طاقة DC): هل اختفى البانك؟",
+   "targets": [
+    "Battery",
+    "BatteryConn",
+    "SmcLine",
+    "Pmu"
+   ],
+   "priority": 78,
+   "hint": "استخدم بطارية معروفة السلامة من جهاز مماثل.",
+   "answers": [
+    {
+     "label": "اختفى البانك",
+     "effects": {
+      "Battery": 45,
+      "BatteryConn": -10,
+      "SmcLine": -25,
+      "Board": -15
+     },
+     "decisive": true,
+     "note": "البطارية السليمة أنهت البانك",
+     "add": false
+    },
+    {
+     "label": "بقي نفس البانك",
+     "effects": {
+      "Battery": -45,
+      "BatteryConn": 10,
+      "SmcLine": 20,
+      "Board": 15,
+      "Pmu": 10
+     },
+     "decisive": false,
+     "note": "البانك مستمر مع بطارية سليمة",
+     "add": false
+    },
+    {
+     "label": "لم أجرّب",
+     "effects": {},
+     "decisive": false,
+     "note": "",
+     "add": false
+    }
+   ],
+   "source": "اختبارات الفحص العملي المعتادة في ورش الصيانة"
+  },
+  {
+   "id": "battery_conn_clean",
+   "text": "نظّفت موصل البطارية وأعدت تركيبه بإحكام: هل اختفى البانك؟",
+   "targets": [
+    "BatteryConn"
+   ],
+   "priority": 70,
+   "answers": [
+    {
+     "label": "اختفى البانك",
+     "effects": {
+      "BatteryConn": 45,
+      "Battery": -15
+     },
+     "decisive": true,
+     "note": "تنظيف الموصل أنهى البانك",
+     "add": false
+    },
+    {
+     "label": "بقي",
+     "effects": {
+      "BatteryConn": -25
+     },
+     "decisive": false,
+     "note": "",
+     "add": false
+    },
+    {
+     "label": "لم أجرّب",
+     "effects": {},
+     "decisive": false,
+     "note": "",
+     "add": false
+    }
+   ],
+   "source": "اختبارات الفحص العملي المعتادة في ورش الصيانة"
+  },
+  {
+   "id": "battery_health",
+   "text": "ماذا تُظهر صحة البطارية في الإعدادات؟",
+   "targets": [
+    "Battery",
+    "BatteryConn"
+   ],
+   "priority": 60,
+   "answers": [
+    {
+     "label": "«قطعة غير معروفة» أو «خدمة»",
+     "effects": {
+      "Battery": 20
+     },
+     "decisive": false,
+     "note": "رسالة البطارية",
+     "add": false
+    },
+    {
+     "label": "نسبة طبيعية بلا رسائل",
+     "effects": {
+      "Battery": -10
+     },
+     "decisive": false,
+     "note": "",
+     "add": false
+    },
+    {
+     "label": "لا تظهر النسبة",
+     "effects": {
+      "Battery": 15,
+      "BatteryConn": 10
+     },
+     "decisive": false,
+     "note": "",
+     "add": false
+    },
+    {
+     "label": "لم أتحقق",
+     "effects": {},
+     "decisive": false,
+     "note": "",
+     "add": false
+    }
+   ],
+   "source": "اختبارات الفحص العملي المعتادة في ورش الصيانة"
+  },
+  {
+   "id": "power_flex_swap",
+   "text": "ركّبت فلاتة زر التشغيل (والفلاش) سليمة: هل اختفى البانك؟",
+   "targets": [
+    "PowerFlex"
+   ],
+   "priority": 65,
+   "answers": [
+    {
+     "label": "اختفى البانك",
+     "effects": {
+      "PowerFlex": 45,
+      "Board": -15
+     },
+     "decisive": true,
+     "note": "فلاتة زر التشغيل السليمة أنهت البانك",
+     "add": false
+    },
+    {
+     "label": "بقي",
+     "effects": {
+      "PowerFlex": -45,
+      "Board": 15
+     },
+     "decisive": false,
+     "note": "",
+     "add": false
+    },
+    {
+     "label": "لم أجرّب",
+     "effects": {},
+     "decisive": false,
+     "note": "",
+     "add": false
+    }
+   ],
+   "source": "اختبارات الفحص العملي المعتادة في ورش الصيانة"
+  },
+  {
+   "id": "front_flex_unplug",
+   "text": "فصلت فلاتة سماعة المكالمات / الحساسات الأمامية وشغّلت الجهاز: ماذا حدث؟",
+   "targets": [
+    "FrontFlex",
+    "Sensors"
+   ],
+   "priority": 62,
+   "answers": [
+    {
+     "label": "اختفى البانك أو تغيّر شكله",
+     "effects": {
+      "FrontFlex": 40
+     },
+     "decisive": true,
+     "note": "الفلاتة الأمامية على مسار العطل",
+     "add": false
+    },
+    {
+     "label": "بقي نفس البانك",
+     "effects": {
+      "FrontFlex": -35,
+      "Sensors": 15
+     },
+     "decisive": false,
+     "note": "",
+     "add": false
+    },
+    {
+     "label": "لم أجرّب",
+     "effects": {},
+     "decisive": false,
+     "note": "",
+     "add": false
+    }
+   ],
+   "source": "اختبارات الفحص العملي المعتادة في ورش الصيانة"
+  },
+  {
+   "id": "screen_swap",
+   "text": "ركّبت شاشة سليمة (أو الأصلية): هل اختفى البانك؟",
+   "targets": [
+    "Screen"
+   ],
+   "priority": 64,
+   "answers": [
+    {
+     "label": "اختفى البانك",
+     "effects": {
+      "Screen": 45
+     },
+     "decisive": true,
+     "note": "الشاشة السليمة أنهت البانك",
+     "add": false
+    },
+    {
+     "label": "بقي",
+     "effects": {
+      "Screen": -40
+     },
+     "decisive": false,
+     "note": "",
+     "add": false
+    },
+    {
+     "label": "لم أجرّب",
+     "effects": {},
+     "decisive": false,
+     "note": "",
+     "add": false
+    }
+   ],
+   "source": "اختبارات الفحص العملي المعتادة في ورش الصيانة"
+  },
+  {
+   "id": "camera_unplug",
+   "text": "فصلت الكاميرات واحدة تلو الأخرى: هل اختفى البانك؟",
+   "targets": [
+    "Camera"
+   ],
+   "priority": 60,
+   "answers": [
+    {
+     "label": "اختفى عند فصل كاميرا",
+     "effects": {
+      "Camera": 45
+     },
+     "decisive": true,
+     "note": "الكاميرا المفصولة كانت السبب",
+     "add": false
+    },
+    {
+     "label": "بقي",
+     "effects": {
+      "Camera": -40,
+      "Board": 10
+     },
+     "decisive": false,
+     "note": "",
+     "add": false
+    },
+    {
+     "label": "لم أجرّب",
+     "effects": {},
+     "decisive": false,
+     "note": "",
+     "add": false
+    }
+   ],
+   "source": "اختبارات الفحص العملي المعتادة في ورش الصيانة"
+  },
+  {
+   "id": "last_part",
+   "text": "فصلت القطعة التي فُكّت أو استُبدلت آخر مرة وأعدت تركيبها (أو جرّبت سليمة): هل اختفى البانك؟",
+   "targets": [
+    "LastPart"
+   ],
+   "priority": 58,
+   "answers": [
+    {
+     "label": "اختفى البانك",
+     "effects": {
+      "LastPart": 45
+     },
+     "decisive": true,
+     "note": "آخر قطعة فُكّت هي السبب",
+     "add": false
+    },
+    {
+     "label": "بقي",
+     "effects": {
+      "LastPart": -35,
+      "Board": 15
+     },
+     "decisive": false,
+     "note": "",
+     "add": false
+    },
+    {
+     "label": "لم يُفك شيء",
+     "effects": {
+      "LastPart": -30
+     },
+     "decisive": false,
+     "note": "",
+     "add": false
+    },
+    {
+     "label": "لم أجرّب",
+     "effects": {},
+     "decisive": false,
+     "note": "",
+     "add": false
+    }
+   ],
+   "source": "اختبارات الفحص العملي المعتادة في ورش الصيانة"
+  },
+  {
+   "id": "wifi_state",
+   "text": "هل الواي فاي يعمل؟",
+   "targets": [
+    "Wifi"
+   ],
+   "priority": 55,
+   "answers": [
+    {
+     "label": "لا يعمل أو رمادي",
+     "effects": {
+      "Wifi": 30
+     },
+     "decisive": false,
+     "note": "الواي فاي معطل",
+     "add": false
+    },
+    {
+     "label": "يعمل طبيعيًا",
+     "effects": {
+      "Wifi": -25,
+      "Ios": 10
+     },
+     "decisive": false,
+     "note": "",
+     "add": false
+    },
+    {
+     "label": "لم أتحقق",
+     "effects": {},
+     "decisive": false,
+     "note": "",
+     "add": false
+    }
+   ],
+   "source": "اختبارات الفحص العملي المعتادة في ورش الصيانة"
+  },
+  {
+   "id": "network_imei",
+   "text": "هل تظهر الشبكة ورقم IMEI في الإعدادات؟",
+   "targets": [
+    "Baseband"
+   ],
+   "priority": 55,
+   "answers": [
+    {
+     "label": "لا شبكة ولا IMEI",
+     "effects": {
+      "Baseband": 35
+     },
+     "decisive": false,
+     "note": "البيسباند لا يستجيب",
+     "add": false
+    },
+    {
+     "label": "تظهر طبيعيًا",
+     "effects": {
+      "Baseband": -25,
+      "Ios": 10
+     },
+     "decisive": false,
+     "note": "",
+     "add": false
+    },
+    {
+     "label": "لم أتحقق",
+     "effects": {},
+     "decisive": false,
+     "note": "",
+     "add": false
+    }
+   ],
+   "source": "اختبارات الفحص العملي المعتادة في ورش الصيانة"
+  },
+  {
+   "id": "biometric_state",
+   "text": "هل يعمل Face ID / Touch ID؟",
+   "targets": [
+    "Biometric",
+    "TouchId"
+   ],
+   "priority": 50,
+   "answers": [
+    {
+     "label": "لا يعمل",
+     "effects": {
+      "Biometric": 25,
+      "TouchId": 25
+     },
+     "decisive": false,
+     "note": "البصمة أو الوجه معطل",
+     "add": false
+    },
+    {
+     "label": "يعمل",
+     "effects": {
+      "Biometric": -20,
+      "TouchId": -20
+     },
+     "decisive": false,
+     "note": "",
+     "add": false
+    },
+    {
+     "label": "لم أتحقق",
+     "effects": {},
+     "decisive": false,
+     "note": "",
+     "add": false
+    }
+   ],
+   "source": "اختبارات الفحص العملي المعتادة في ورش الصيانة"
+  },
+  {
+   "id": "audio_state",
+   "text": "هل المكالمات والسماعة الخارجية والتسجيل الصوتي تعمل؟",
+   "targets": [
+    "AudioIc",
+    "AudioParts"
+   ],
+   "priority": 50,
+   "answers": [
+    {
+     "label": "لا تعمل كلها",
+     "effects": {
+      "AudioIc": 25,
+      "AudioParts": 10
+     },
+     "decisive": false,
+     "note": "",
+     "add": false
+    },
+    {
+     "label": "جزء منها لا يعمل",
+     "effects": {
+      "AudioParts": 25
+     },
+     "decisive": false,
+     "note": "",
+     "add": false
+    },
+    {
+     "label": "كلها تعمل",
+     "effects": {
+      "AudioIc": -20,
+      "AudioParts": -20
+     },
+     "decisive": false,
+     "note": "",
+     "add": false
+    },
+    {
+     "label": "لم أتحقق",
+     "effects": {},
+     "decisive": false,
+     "note": "",
+     "add": false
+    }
+   ],
+   "source": "اختبارات الفحص العملي المعتادة في ورش الصيانة"
+  },
+  {
+   "id": "ios_restore",
+   "text": "أعدت تثبيت iOS عبر الكمبيوتر (استعادة كاملة، بدون النسخة الاحتياطية): هل اختفى البانك؟",
+   "targets": [
+    "Ios",
+    "Nand",
+    "SocRam"
+   ],
+   "priority": 45,
+   "hint": "جرّب قبل استعادة النسخة الاحتياطية، حتى لا يعود الملف التالف.",
+   "answers": [
+    {
+     "label": "اختفى البانك",
+     "effects": {
+      "Ios": 50,
+      "Nand": -20,
+      "SocRam": -20,
+      "Board": -15
+     },
+     "decisive": true,
+     "note": "الاستعادة أنهت البانك",
+     "add": false
+    },
+    {
+     "label": "بقي",
+     "effects": {
+      "Ios": -45,
+      "Nand": 15,
+      "SocRam": 10,
+      "Board": 10
+     },
+     "decisive": false,
+     "note": "",
+     "add": false
+    },
+    {
+     "label": "فشلت الاستعادة",
+     "effects": {
+      "Nand": 30,
+      "Board": 15
+     },
+     "decisive": false,
+     "note": "فشل الاستعادة يرجّح الذاكرة أو البوردة",
+     "add": false
+    },
+    {
+     "label": "لم أجرّب",
+     "effects": {},
+     "decisive": false,
+     "note": "",
+     "add": false
+    }
+   ],
+   "source": "اختبارات الفحص العملي المعتادة في ورش الصيانة"
+  },
+  {
+   "id": "charger_swap",
+   "text": "جرّبت شاحنًا وكيبلًا أصليين: هل تغيّر شيء؟",
+   "targets": [
+    "Accessory",
+    "ChargeIc"
+   ],
+   "priority": 40,
+   "answers": [
+    {
+     "label": "اختفت المشكلة",
+     "effects": {
+      "Accessory": 45
+     },
+     "decisive": true,
+     "note": "الملحق كان السبب",
+     "add": false
+    },
+    {
+     "label": "لم يتغير",
+     "effects": {
+      "Accessory": -35,
+      "ChargeIc": 10
+     },
+     "decisive": false,
+     "note": "",
+     "add": false
+    },
+    {
+     "label": "لم أجرّب",
+     "effects": {},
+     "decisive": false,
+     "note": "",
+     "add": false
+    }
+   ],
+   "source": "اختبارات الفحص العملي المعتادة في ورش الصيانة"
+  },
+  {
+   "id": "impact",
+   "text": "هل يوجد أثر ضربة أو انحناء في جسم الجهاز؟",
+   "targets": [
+    "Board",
+    "BatteryConn",
+    "Screen"
+   ],
+   "priority": 35,
+   "answers": [
+    {
+     "label": "نعم",
+     "effects": {
+      "Board": 15,
+      "BatteryConn": 10
+     },
+     "decisive": false,
+     "note": "أثر ضربة",
+     "add": false
+    },
+    {
+     "label": "لا",
+     "effects": {
+      "Board": -5
+     },
+     "decisive": false,
+     "note": "",
+     "add": false
+    },
+    {
+     "label": "لم أتحقق",
+     "effects": {},
+     "decisive": false,
+     "note": "",
+     "add": false
+    }
+   ],
+   "source": "اختبارات الفحص العملي المعتادة في ورش الصيانة"
   }
  ]
 }

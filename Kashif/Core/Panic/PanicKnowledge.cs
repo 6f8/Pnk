@@ -51,7 +51,12 @@ public sealed class Candidate
 }
 
 /// <summary>دليل من نص السجل: ماذا وُجد، وقيمته، ومعناه — Needle نص يُبحث عنه في السجل لتظليل مكانه</summary>
-public sealed record Evidence(string What, string Value, string Meaning, string Needle = null);
+public sealed record Evidence(string What, string Value, string Meaning, string Needle = null, string Group = "")
+{
+    /// <summary>مجموعة الدليل: "" أساسي، "info" معلومة من السجل بلا أثر على الترتيب، "exam" جواب من الفحص العملي</summary>
+    public bool IsInfo => Group == "info";
+    public bool IsExam => Group == "exam";
+}
 
 /// <summary>ما يعرفه الفني عن الحالة (يغيّر ترتيب الأسباب — لا يضيف قطعًا بلا دليل إلا السوائل)</summary>
 public sealed class CaseFlags
@@ -143,6 +148,12 @@ public static class PanicKnowledge
     public sealed record SmcKey(string Key, string Meaning, bool Battery, string Source);
     public sealed record Service(string Name, string What, Choice[] Choices, string[] Steps, string Confidence, string Source, string Level);
     public sealed record Signature(string Kind, string Title, Regex Match, string Explain, Choice[] Choices, string[] Steps, string Confidence, string Source, string Level);
+    /// <summary>درايفر (kext) يظهر في مسار الانهيار ← القطع المرتبطة به (دليل ثانوي)</summary>
+    public sealed record Kext(string Prefix, string What, Choice[] Choices, string Source);
+    /// <summary>جواب في الفحص التفاعلي: أثره على درجة كل قطعة (بالاسم)، وهل هو اختبار حاسم</summary>
+    public sealed record AnswerOption(string Label, IReadOnlyDictionary<string, int> Effects, bool Decisive, string Note, bool Add);
+    /// <summary>سؤال في الفحص التفاعلي: يُسأل عندما تكون إحدى قطعه المستهدفة بين الأسباب الأعلى</summary>
+    public sealed record Question(string Id, string Text, string Hint, string[] Targets, int Priority, AnswerOption[] Answers, string Source);
 
     /// <summary>قاعدة معرفة كاملة مقروءة من ملف</summary>
     public sealed class Base
@@ -152,6 +163,8 @@ public static class PanicKnowledge
         public Dictionary<string, SmcKey> SmcKeys = new(StringComparer.Ordinal);
         public List<Service> Services = new();
         public List<Signature> Signatures = new();
+        public List<Kext> Kexts = new();
+        public List<Question> Questions = new();
         /// <summary>مشكلات في الملف (قطعة غير معروفة، درجة خارج الحدود، تعبير غير صالح...) — فارغة إذا كان الملف سليمًا</summary>
         public List<string> Problems = new();
     }
@@ -259,6 +272,43 @@ public static class PanicKnowledge
                 b.Signatures.Add(new Signature(kind, S(e, "title"), rx, S(e, "explain"), Choices(e.GetProperty("choices"), $"التوقيع {kind}"), steps, S(e, "confidence"), S(e, "source"), S(e, "level")));
             }
 
+        if (root.TryGetProperty("kexts", out var kexts))
+            foreach (var e in kexts.EnumerateArray())
+            {
+                var prefix = S(e, "prefix");
+                if (!prefix.StartsWith("com.apple.", StringComparison.Ordinal)) b.Problems.Add($"الدرايفر «{prefix}» لا يبدأ بـ com.apple.");
+                b.Kexts.Add(new Kext(prefix, S(e, "what"), Choices(e.GetProperty("choices"), $"الدرايفر {prefix}"), S(e, "source")));
+            }
+
+        if (root.TryGetProperty("questions", out var questions))
+            foreach (var e in questions.EnumerateArray())
+            {
+                var id = S(e, "id");
+                var targets = new List<string>();
+                foreach (var t in Strings(e, "targets"))
+                    if (Parts.ByKey.TryGetValue(t, out var tn)) targets.Add(tn); else b.Problems.Add($"السؤال {id}: قطعة مستهدفة غير معروفة «{t}»");
+                var answers = new List<AnswerOption>();
+                if (e.TryGetProperty("answers", out var arr))
+                    foreach (var a in arr.EnumerateArray())
+                    {
+                        var effects = new Dictionary<string, int>();
+                        if (a.TryGetProperty("effects", out var ef))
+                            foreach (var p in ef.EnumerateObject())
+                            {
+                                if (!Parts.ByKey.TryGetValue(p.Name, out var pn)) { b.Problems.Add($"السؤال {id}: قطعة غير معروفة في الأثر «{p.Name}»"); continue; }
+                                int delta = p.Value.TryGetInt32(out var dv) ? dv : 0;
+                                if (delta is < -60 or > 60) b.Problems.Add($"السؤال {id}: أثر {delta} خارج -60..60");
+                                effects[pn] = Math.Clamp(delta, -60, 60);
+                            }
+                        bool Flag(string n) => a.TryGetProperty(n, out var f) && f.ValueKind == System.Text.Json.JsonValueKind.True;
+                        answers.Add(new AnswerOption(S(a, "label"), effects, Flag("decisive"), S(a, "note"), Flag("add")));
+                    }
+                if (answers.Count < 2) b.Problems.Add($"السؤال {id}: أقل من جوابين");
+                if (b.Questions.Any(q => q.Id == id)) b.Problems.Add($"السؤال {id} مكرر");
+                int pr = e.TryGetProperty("priority", out var pe) && pe.TryGetInt32(out var pv) ? pv : 0;
+                b.Questions.Add(new Question(id, S(e, "text"), S(e, "hint"), targets.ToArray(), pr, answers.ToArray(), S(e, "source")));
+            }
+
         foreach (var c in b.Services.Select(x => x.Confidence).Concat(b.Signatures.Select(x => x.Confidence)))
             if (c is not ("عالية" or "متوسطة" or "منخفضة")) b.Problems.Add($"درجة ثقة غير صالحة «{c}»");
         return b;
@@ -266,6 +316,11 @@ public static class PanicKnowledge
 
     public static Sensor FindSensor(string code) =>
         Current.Sensors.FirstOrDefault(s => s.Code.Equals(code, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>الدرايفر الأطول تطابقًا مع اسم الحزمة (com.apple.driver.AppleHPM يغلب com.apple.driver.AppleH)</summary>
+    public static Kext FindKext(string bundleId) =>
+        string.IsNullOrEmpty(bundleId) ? null
+        : Current.Kexts.Where(k => bundleId.StartsWith(k.Prefix, StringComparison.Ordinal)).OrderByDescending(k => k.Prefix.Length).FirstOrDefault();
 
     public static Service FindService(string name) =>
         Current.Services.FirstOrDefault(s => s.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
