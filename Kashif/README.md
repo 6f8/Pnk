@@ -10,7 +10,7 @@
 2. افتح `Kashif.csproj` — تُنزَّل حزمة `Microsoft.Data.Sqlite` تلقائيًا.
 3. شغّل بـ F5، أو من الطرفية: `dotnet run`
 4. نسخة تنفيذية مستقلة: `dotnet publish -c Release -r win-x64 --self-contained -p:PublishSingleFile=true`
-5. الدخول الأول: **admin / admin** — ثم شاشة ترحيب لبيانات المحل وكلمة مرور جديدة.
+5. يفتح البرنامج مباشرة بلا تسجيل دخول. بيانات المحل (تظهر في الطباعة) تُعدَّل عند الحاجة من **الإعدادات**.
 
 بيانات المحل: `%LOCALAPPDATA%\Kashif\kashif.db` — وسجل الأخطاء في `errors.log` بجانبها.
 

@@ -62,20 +62,15 @@ static class Program
         // المظهر المختار من الإعدادات (يُطبَّق قبل بناء أي شاشة)
         try { Theme.Apply(Settings.Get("ui_theme", "classic")); } catch { Theme.Apply("classic"); }
 
-        // حلقة الدخول: «تسجيل الخروج» يعيد إلى شاشة الدخول بدل إغلاق البرنامج
-        while (true)
+        // بلا شاشة دخول: يفتح البرنامج مباشرة بحساب المدير
+        try { Session.Start(); }
+        catch (Exception ex)
         {
-            using (var login = new LoginForm())
-                if (login.ShowDialog() != DialogResult.OK) return;
-
-            if (Session.UsingDefaultPassword)
-                using (var setup = new SetupDialog()) setup.ShowDialog();
-
-            var main = new MainForm();
-            Application.Run(main);
-            if (!main.LoggedOut) return;
-            Session.Logout();
+            Log(ex);
+            Dialogs.Error("تعذر تجهيز البرنامج:\n" + ex.Message, "كاشف");
+            return;
         }
+        Application.Run(new MainForm());
     }
 
     static void ReportError(Exception ex)

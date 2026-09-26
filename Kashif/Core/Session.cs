@@ -29,9 +29,6 @@ public static class Session
         return false;
     }
 
-    /// <summary>كلمة المرور الافتراضية ما زالت مستخدمة؟ (تُطلب إعادة تعيينها عند أول دخول)</summary>
-    public static bool UsingDefaultPassword;
-
     // PBKDF2-SHA256 مع ملح عشوائي لكل مستخدم: pbkdf2$التكرارات$الملح$الناتج
     const int Iterations = 120_000;
 
@@ -95,13 +92,23 @@ public static class Session
         IsAdmin = Db.L(r["is_admin"]) == 1;
         Perms = Db.Query("SELECT perm FROM user_perms WHERE user_id=@p0", UserId)
                   .Rows.Cast<DataRow>().Select(x => Db.S(x["perm"])).ToHashSet();
-        UsingDefaultPassword = pass == "admin" || string.Equals(pass, Db.S(r["username"]), StringComparison.OrdinalIgnoreCase);
         return true;
     }
 
-    public static void Logout()
+    /// <summary>
+    /// بدء البرنامج بلا شاشة دخول: حساب المدير الأول (أو أول حساب فعّال) بكل الصلاحيات.
+    /// الحساب يبقى لأن الفحوصات وسجل العمليات تُحفظ باسم مستخدم.
+    /// </summary>
+    public static void Start()
     {
-        UserId = 0; UserName = ""; IsAdmin = false; Perms = new(); UsingDefaultPassword = false;
+        var dt = Db.Query("SELECT id,username,full_name FROM users WHERE active=1 ORDER BY is_admin DESC, id LIMIT 1");
+        if (dt.Rows.Count == 0) dt = Db.Query("SELECT id,username,full_name FROM users ORDER BY is_admin DESC, id LIMIT 1");
+        if (dt.Rows.Count == 0) throw new InvalidOperationException("لا يوجد أي حساب في قاعدة البيانات.");
+        var r = dt.Rows[0];
+        UserId = Db.L(r["id"]);
+        UserName = Db.S(r["full_name"]) != "" ? Db.S(r["full_name"]) : Db.S(r["username"]);
+        IsAdmin = true;
+        Perms = new();
     }
 }
 

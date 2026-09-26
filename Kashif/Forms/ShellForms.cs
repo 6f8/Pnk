@@ -19,221 +19,6 @@ public static class Brand
     }
 }
 
-// ============================== تسجيل الدخول ==============================
-public class LoginForm : BaseForm
-{
-    readonly TextBox user = new() { Width = 340 };
-    readonly TextBox pass = new() { Width = 340, UseSystemPasswordChar = true };
-    readonly Label err = new() { AutoSize = false, Width = 340, Height = 26, ForeColor = Theme.Danger, Font = Theme.F(9.5f), TextAlign = ContentAlignment.MiddleLeft };
-    Point drag;
-
-    public LoginForm()
-    {
-        Text = "تسجيل الدخول — كاشف";
-        FormBorderStyle = FormBorderStyle.None;
-        Size = new Size(940, 580);
-        BackColor = Theme.Surface;
-        KeyPreview = true;
-
-        var brand = new BrandPanel { Dock = DockStyle.Right, Width = 420 };
-        var close = new ModernButton { Kind = BtnKind.Glass, IconName = "x", Size = new Size(36, 36), Location = new Point(16, 16), TabStop = false };
-        close.Click += (s, e) => { DialogResult = DialogResult.Cancel; Close(); };
-        brand.Controls.Add(close);
-
-        var host = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface, Padding = new Padding(70, 70, 70, 30) };
-        var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, BackColor = Theme.Surface };
-        flow.Controls.Add(new Label { Text = "تسجيل الدخول", AutoSize = false, Width = 360, Height = 46, Font = Theme.FS(20), ForeColor = Theme.Ink, TextAlign = ContentAlignment.MiddleLeft });
-        flow.Controls.Add(new Label { Text = "مرحبًا بعودتك، أدخل بياناتك للمتابعة", AutoSize = false, Width = 360, Height = 34, Font = Theme.F(10.5f), ForeColor = Theme.Muted, TextAlign = ContentAlignment.TopLeft, Margin = new Padding(3, 0, 3, 18) });
-
-        flow.Controls.Add(Caption("اسم المستخدم"));
-        var userBox = new InputBox(user, 348, "user") { Height = 46, Margin = new Padding(3, 0, 3, 14) };
-        flow.Controls.Add(userBox);
-        flow.Controls.Add(Caption("كلمة المرور"));
-        var passBox = new InputBox(pass, 348, "lock") { Height = 46, Margin = new Padding(3, 0, 3, 4) };
-        var eye = new ModernButton { Kind = BtnKind.Ghost, IconName = "eye", Size = new Size(32, 32), TabStop = false };
-        eye.Click += (s, e) => { pass.UseSystemPasswordChar = !pass.UseSystemPasswordChar; eye.IconName = pass.UseSystemPasswordChar ? "eye" : "eye-off"; eye.Invalidate(); pass.Focus(); };
-        passBox.Trailing = eye;
-        flow.Controls.Add(passBox);
-        flow.Controls.Add(err);
-
-        var b = new ModernButton { Text = "دخول", IconName = "log-in", Width = 348, Height = 46, Font = Theme.FS(11), Margin = new Padding(3, 8, 3, 10) };
-        b.Click += (s, e) => TryLogin();
-        flow.Controls.Add(b);
-        AcceptButton = b;
-
-        if (DefaultAdminActive())
-            flow.Controls.Add(new Label
-            {
-                Text = "أول مرة؟ اسم المستخدم admin وكلمة المرور admin — ستُطلب منك كلمة مرور جديدة بعد الدخول.",
-                AutoSize = false, Width = 348, Height = 44, Font = Theme.F(9), ForeColor = Theme.Muted, TextAlign = ContentAlignment.TopLeft
-            });
-
-        host.Controls.Add(flow);
-        Controls.Add(host);
-        Controls.Add(brand);
-
-        foreach (var c in new Control[] { brand, host, flow })
-        {
-            c.MouseDown += (s, e) => drag = e.Location;
-            c.MouseMove += (s, e) => { if (e.Button == MouseButtons.Left) Location = new Point(Location.X + e.X - drag.X, Location.Y + e.Y - drag.Y); };
-        }
-        pass.KeyUp += (s, e) => CapsHint();
-        user.TextChanged += (s, e) => err.Text = "";
-        pass.TextChanged += (s, e) => err.Text = "";
-        KeyDown += (s, e) => { if (e.KeyCode == Keys.Escape) Close(); };
-        Shown += (s, e) => { if (user.Text == "") user.Focus(); else pass.Focus(); };
-    }
-
-    static Label Caption(string t) => new()
-    {
-        Text = t, AutoSize = false, Width = 348, Height = 26, Font = Theme.FS(9.5f), ForeColor = Theme.Text2,
-        TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(3, 0, 3, 2)
-    };
-
-    protected override CreateParams CreateParams { get { var cp = base.CreateParams; cp.ClassStyle |= 0x20000; return cp; } }
-
-    [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
-    protected override void OnHandleCreated(EventArgs e)
-    {
-        base.OnHandleCreated(e);
-        try { int round = 2; DwmSetWindowAttribute(Handle, 33, ref round, sizeof(int)); } catch { }
-    }
-
-    static bool DefaultAdminActive()
-    {
-        try
-        {
-            var dt = Db.Query("SELECT username, pass_hash FROM users WHERE username='admin' AND active=1");
-            return dt.Rows.Count == 1 && Session.Verify("admin", Db.S(dt.Rows[0]["pass_hash"]));
-        }
-        catch { return false; }
-    }
-
-    void CapsHint()
-    {
-        if (Control.IsKeyLocked(Keys.CapsLock)) { err.ForeColor = Theme.Warning; err.Text = "تنبيه: زر Caps Lock مفعّل"; }
-        else if (err.ForeColor == Theme.Warning) err.Text = "";
-    }
-
-    void TryLogin()
-    {
-        if (user.Text.Trim() == "") { err.ForeColor = Theme.Danger; err.Text = "أدخل اسم المستخدم."; user.Focus(); return; }
-        Cursor = Cursors.WaitCursor;
-        bool ok = Session.Login(user.Text, pass.Text);
-        Cursor = Cursors.Default;
-        if (ok) { DialogResult = DialogResult.OK; Close(); return; }
-        err.ForeColor = Theme.Danger;
-        err.Text = "اسم المستخدم أو كلمة المرور غير صحيحة.";
-        pass.SelectAll();
-        pass.Focus();
-    }
-
-    /// <summary>لوحة الهوية الجانبية في شاشة الدخول</summary>
-    sealed class BrandPanel : Panel
-    {
-        public BrandPanel()
-        {
-            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-            BackColor = Theme.Orange;   // لون التدرج عند زر الإغلاق (الأزرار تُرسم فوق لون الحاوية)
-        }
-
-        protected override void OnPaintBackground(PaintEventArgs e) { }
-
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            var g = e.Graphics;
-            Gfx.Hq(g);
-            var rect = ClientRectangle;
-            int S(int v) => Dpi.S(v);
-            using (var bg = new LinearGradientBrush(rect, Theme.Orange, Gfx.Mix(Theme.Orange, Theme.Amber, 0.65f), 70f))
-                g.FillRectangle(bg, rect);
-            // دوائر زخرفية ناعمة
-            using (var b1 = new SolidBrush(Color.FromArgb(34, 255, 255, 255))) g.FillEllipse(b1, -S(120), Height - S(260), S(380), S(380));
-            using (var b2 = new SolidBrush(Color.FromArgb(26, 255, 255, 255))) g.FillEllipse(b2, Width - S(170), -S(110), S(300), S(300));
-            using (var pen = new Pen(Color.FromArgb(50, 255, 255, 255), 1)) g.DrawEllipse(pen, Width - S(230), -S(170), S(420), S(420));
-
-            int right = Width - S(48);
-            // الشعار بخلفية بيضاء ليتميز عن التدرج
-            var mark = new RectangleF(right - S(58), S(70), S(58), S(58));
-            Gfx.FillRound(g, mark, S(16), Color.White);
-            TextRenderer.DrawText(g, "ك", FontKit.GetPx(mark.Height * 0.52f, FontStyle.Bold), Rectangle.Round(new RectangleF(mark.X, mark.Y - S(3), mark.Width, mark.Height)), Theme.Orange, Gfx.Center);
-            TextRenderer.DrawText(g, "كاشف", Theme.FS(30), new Rectangle(S(40), S(142), right - S(40), S(60)), Color.White, Gfx.RtlStart);
-            TextRenderer.DrawText(g, "تحليل بانك الآيفون وتشخيص أعطاله", Theme.F(12), new Rectangle(S(40), S(202), right - S(40), S(32)), Color.FromArgb(235, 255, 255, 255), Gfx.RtlStart);
-
-            var features = new[]
-            {
-                ("scan-line", "حلّل ملفات panic-full أو النص المنسوخ"),
-                ("list-ordered", "الأسباب مرتبة مع خطوات الفحص"),
-                ("history", "سجل فحوصات لكل جهاز"),
-                ("lightbulb", "أضف خبرة محلك ليتعلم منها البرنامج"),
-            };
-            int y = S(272), box = S(34);
-            foreach (var (icon, text) in features)
-            {
-                var ir = new RectangleF(right - box, y, box, box);
-                Gfx.FillRound(g, ir, S(10), Color.FromArgb(56, 255, 255, 255));
-                Icons.Draw(g, icon, ir, Color.White, 17);
-                TextRenderer.DrawText(g, text, Theme.F(10.5f), new Rectangle(S(40), y, right - box - S(14) - S(40), box), Color.White, Gfx.RtlStart);
-                y += S(50);
-            }
-            TextRenderer.DrawText(g, "الإصدار " + Application.ProductVersion.Split('+')[0], Theme.F(9), new Rectangle(S(40), Height - S(50), right - S(40), S(24)), Color.FromArgb(215, 255, 255, 255), Gfx.RtlStart);
-        }
-    }
-}
-
-// ============================== أول تشغيل ==============================
-/// <summary>ترحيب لمرة واحدة: بيانات المحل وتغيير كلمة المرور الافتراضية</summary>
-public class SetupDialog : DialogShell
-{
-    public SetupDialog() : base("مرحبًا بك في كاشف", 600, 560, "sparkles")
-    {
-        var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, BackColor = Theme.Surface };
-        flow.Controls.Add(new Label
-        {
-            Text = "خطوة واحدة قبل البدء: أدخل بيانات محلك لتظهر في تقارير الفحص المطبوعة، واختر كلمة مرور جديدة بدل الافتراضية لحماية بياناتك.",
-            AutoSize = false, Width = 530, Height = 52, ForeColor = Theme.Text2, Font = Theme.F(10), TextAlign = ContentAlignment.TopLeft
-        });
-        var shop = new TextBox { Width = 522, Text = Settings.Get("shop_name") == "محلي" ? "" : Settings.Get("shop_name"), PlaceholderText = "مثال: مركز النور للصيانة" };
-        var phone = new TextBox { Width = 253, Text = Settings.Get("shop_phone"), PlaceholderText = "07xx xxx xxxx" };
-        var addr = new TextBox { Width = 253, Text = Settings.Get("shop_address"), PlaceholderText = "المدينة — الشارع" };
-        var p1 = new TextBox { Width = 253, UseSystemPasswordChar = true };
-        var p2 = new TextBox { Width = 253, UseSystemPasswordChar = true };
-        // بيانات المحل يدخلها المدير فقط؛ المستخدم العادي يغيّر كلمة مروره فقط
-        if (Session.IsAdmin)
-        {
-            flow.Controls.Add(Ui.Labeled("اسم المحل", shop));
-            flow.Controls.Add(Ui.Labeled("الهاتف", phone));
-            flow.Controls.Add(Ui.Labeled("العنوان", addr));
-        }
-        else Height = 440;
-        flow.Controls.Add(new Label { Text = "كلمة المرور الجديدة (4 أحرف على الأقل)", AutoSize = false, Width = 522, Height = 34, Font = Theme.FS(10.5f), ForeColor = Theme.Ink, TextAlign = ContentAlignment.BottomLeft, Margin = new Padding(6, 10, 6, 0) });
-        flow.Controls.Add(Ui.Labeled("كلمة المرور", p1));
-        flow.Controls.Add(Ui.Labeled("تأكيد كلمة المرور", p2));
-        Body.Controls.Add(flow);
-
-        AddButton("لاحقًا", DialogResult.Cancel, BtnKind.Secondary, "clock");
-        var ok = AddButton("حفظ والبدء", DialogResult.None, BtnKind.Primary, "check");
-        AcceptButton = ok;
-        ok.Click += (s, e) =>
-        {
-            if (p1.Text.Length < 4) { Dialogs.Warn("كلمة المرور قصيرة جدًا (4 أحرف على الأقل)."); p1.Focus(); return; }
-            if (p1.Text != p2.Text) { Dialogs.Warn("تأكيد كلمة المرور غير مطابق."); p2.Focus(); return; }
-            if (p1.Text == "admin") { Dialogs.Warn("اختر كلمة مرور مختلفة عن الافتراضية."); p1.Focus(); return; }
-            if (Session.IsAdmin)
-            {
-                if (shop.Text.Trim() != "") Settings.Set("shop_name", shop.Text.Trim());
-                Settings.Set("shop_phone", phone.Text.Trim());
-                Settings.Set("shop_address", addr.Text.Trim());
-            }
-            Db.Exec("UPDATE users SET pass_hash=@p0 WHERE id=@p1", Session.HashPassword(p1.Text), Session.UserId);
-            Session.UsingDefaultPassword = false;
-            DialogResult = DialogResult.OK;
-            Close();
-        };
-        Shown += (s, e) => { if (Session.IsAdmin) shop.Focus(); else p1.Focus(); };
-    }
-}
-
 // ============================== النافذة الرئيسية ==============================
 public class MainForm : BaseForm
 {
@@ -274,8 +59,7 @@ public class MainForm : BaseForm
     readonly ScrollHost nav = new() { Dock = DockStyle.Fill, BackColor = Theme.Sidebar };
     readonly List<NavLabel> navLabels = new();
     readonly ToolTip navTip = new();
-    Panel logo, userBox;
-    Control[] userButtons;
+    Panel logo;
     bool rail;
     readonly NotifyIcon tray = new() { Icon = SystemIcons.Application, Visible = true, Text = "كاشف" };
     readonly System.Windows.Forms.Timer timer = new() { Interval = 30_000 };
@@ -284,7 +68,6 @@ public class MainForm : BaseForm
     readonly List<(NavItem Btn, Page Page)> navItems = new();
     NavSection homeHead;
     string activeKey;
-    public bool LoggedOut { get; private set; }
     public static MainForm Instance { get; private set; }
 
     public List<Page> Pages { get; }
@@ -347,31 +130,6 @@ public class MainForm : BaseForm
             g.DrawLine(pen, Dpi.S(14), logo.Height - 1, logo.Width - Dpi.S(14), logo.Height - 1);
         };
 
-        // ---------- المستخدم ----------
-        userBox = new Panel { Dock = DockStyle.Bottom, Height = 68, BackColor = Theme.Sidebar };
-        userBox.Paint += (s, e) =>
-        {
-            var g = e.Graphics;
-            using (var pen = new Pen(Theme.SidebarBorder)) g.DrawLine(pen, Dpi.S(14), 0, userBox.Width - Dpi.S(14), 0);
-            int a = Dpi.S(36);
-            var av = rail ? new RectangleF((userBox.Width - a) / 2f, (userBox.Height - a) / 2f, a, a) : new RectangleF(userBox.Width - Dpi.S(20) - a, (userBox.Height - a) / 2f, a, a);
-            Avatar.Draw(g, av, Session.UserName, HomeTint);
-            if (rail) return;
-            int left = Dpi.S(96), right = (int)av.X - Dpi.S(10);
-            TextRenderer.DrawText(g, Session.UserName, Theme.FS(10), new Rectangle(left, (int)av.Y - Dpi.S(3), right - left, Dpi.S(22)), Theme.SidebarText, Gfx.RtlStart);
-            TextRenderer.DrawText(g, Session.IsAdmin ? "مدير النظام" : "مستخدم", Theme.F(8.5f), new Rectangle(left, (int)av.Y + Dpi.S(18), right - left, Dpi.S(20)), Theme.SidebarMuted, Gfx.RtlStart);
-        };
-        var bLogout = new ModernButton { Kind = BtnKind.SideGhost, IconName = "log-out", Size = new Size(36, 36), Location = new Point(12, 16), TabStop = false };
-        navTip.SetToolTip(bLogout, "تسجيل الخروج");
-        bLogout.Click += (s, e) => { if (Ui.Confirm("تسجيل الخروج من البرنامج؟") && CloseAllTabs()) { LoggedOut = true; Close(); } };
-        var bPwd = new ModernButton { Kind = BtnKind.SideGhost, IconName = "key-round", Size = new Size(36, 36), Location = new Point(52, 16), TabStop = false };
-        navTip.SetToolTip(bPwd, "تغيير كلمة المرور");
-        bPwd.Click += (s, e) => { using var d = new PasswordDialog(); d.ShowModal(); };
-        userBox.Controls.Add(bLogout);
-        userBox.Controls.Add(bPwd);
-        userButtons = new Control[] { bLogout, bPwd };
-        navTip.SetToolTip(userBox, Session.UserName);
-
         // ---------- الأقسام (تُفتح وتُطوى)، مجمّعة تحت عناوين صغيرة ----------
         nav.Add(new Panel { Height = 8, BackColor = Theme.Sidebar });
         var home = Pages.FirstOrDefault(p => p.Text == HomeKey);
@@ -424,7 +182,6 @@ public class MainForm : BaseForm
         }
         nav.Add(new Panel { Height = 12, BackColor = Theme.Sidebar });
         side.Controls.Add(nav);
-        side.Controls.Add(userBox);
         side.Controls.Add(logo);
         // خط فاصل رفيع بين القائمة والمحتوى
         side.Controls.Add(new Panel { Dock = DockStyle.Left, Width = 1, BackColor = Theme.SidebarBorder });
@@ -466,7 +223,7 @@ public class MainForm : BaseForm
         };
         FormClosing += (s, e) =>
         {
-            if (!LoggedOut && e.CloseReason == CloseReason.UserClosing && !CloseAllTabs()) { e.Cancel = true; return; }
+            if (e.CloseReason == CloseReason.UserClosing && !CloseAllTabs()) { e.Cancel = true; return; }
             timer.Stop();
             if (Settings.Get("backup_on_exit") == "1") try { Backup.Run(); } catch { }
             tray.Visible = false;
@@ -554,7 +311,6 @@ public class MainForm : BaseForm
             head.Rail = on;
             foreach (var it in items) it.Visible = !on && head.Expanded;
         }
-        foreach (var b in userButtons) b.Visible = !on;
         nav.ResumeContent();
         nav.ScrollToTop();
         ResumeLayout(true);
@@ -1269,36 +1025,5 @@ public class UsersForm : BaseForm
             lblMode.Text = "تعديل: " + u;
         }
         catch (Exception ex) { Ui.Warn("تعذر الحفظ: " + ex.Message); }
-    }
-}
-
-/// <summary>تغيير كلمة مرور المستخدم الحالي</summary>
-public class PasswordDialog : DialogShell
-{
-    public PasswordDialog() : base("تغيير كلمة المرور", 440, 420, "key-round")
-    {
-        var old = new TextBox { Width = 380, UseSystemPasswordChar = true };
-        var p1 = new TextBox { Width = 380, UseSystemPasswordChar = true };
-        var p2 = new TextBox { Width = 380, UseSystemPasswordChar = true };
-        var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, BackColor = Theme.Surface };
-        flow.Controls.Add(Ui.Labeled("كلمة المرور الحالية", old));
-        flow.Controls.Add(Ui.Labeled("كلمة المرور الجديدة", p1));
-        flow.Controls.Add(Ui.Labeled("تأكيد كلمة المرور", p2));
-        Body.Controls.Add(flow);
-        AddButton("إلغاء", DialogResult.Cancel, BtnKind.Secondary);
-        var ok = AddButton("حفظ", DialogResult.None);
-        AcceptButton = ok;
-        ok.Click += (s, e) =>
-        {
-            var hash = Db.S(Db.Scalar("SELECT pass_hash FROM users WHERE id=@p0", Session.UserId));
-            if (!Session.Verify(old.Text, hash)) { Ui.Warn("كلمة المرور الحالية غير صحيحة."); return; }
-            if (p1.Text.Length < 4) { Ui.Warn("كلمة المرور قصيرة جدًا (4 أحرف على الأقل)."); return; }
-            if (p1.Text != p2.Text) { Ui.Warn("التأكيد غير مطابق."); return; }
-            Db.Exec("UPDATE users SET pass_hash=@p0 WHERE id=@p1", Session.HashPassword(p1.Text), Session.UserId);
-            Session.UsingDefaultPassword = false;
-            Toast.Show("تم تغيير كلمة المرور");
-            DialogResult = DialogResult.OK;
-        };
-        Shown += (s, e) => old.Focus();
     }
 }
