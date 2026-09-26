@@ -29,6 +29,7 @@ public class DeviceMap : Control
     List<Candidate> candidates = new();
     readonly List<(Zone Zone, RectangleF Rect, int Rank, Candidate Cause)> drawn = new();
     Zone hover;
+    string selected;
 
     /// <summary>نقر على مكان في المخطط — يحمل اسم القطعة الأعلى ترتيبًا فيه</summary>
     public event Action<string> PartClicked;
@@ -43,7 +44,15 @@ public class DeviceMap : Control
     {
         candidates = d?.Candidates.ToList() ?? new();
         hover = null;
+        if (selected != null && RankOf(selected) == 0) selected = null;
         tip.SetToolTip(this, null);
+        Invalidate();
+    }
+
+    /// <summary>تمييز مكان القطعة (عند النقر على سببها في القائمة)</summary>
+    public void Select(string part)
+    {
+        selected = part;
         Invalidate();
     }
 
@@ -114,6 +123,8 @@ public class DeviceMap : Control
                 continue;
             }
             var (fg, bg) = Colors(cause);
+            if (selected != null && z.Parts.Contains(selected))
+                Gfx.DrawRound(g, RectangleF.Inflate(r, S(4), S(4)), rad + S(4), Theme.Ink, S(2));
             Gfx.FillRound(g, r, rad, hot ? Gfx.Mix(bg, fg, 0.18f) : bg);
             using (var p = new Pen(fg, rank == 1 ? S(3) : S(2)))
             using (var path = Gfx.Round(r, rad))
@@ -183,7 +194,9 @@ public class DeviceMap : Control
     {
         base.OnMouseClick(e);
         var hit = HitTest(e.Location);
-        if (hit.Cause != null) PartClicked?.Invoke(hit.Cause.Part);
+        if (hit.Cause == null) return;
+        Select(hit.Cause.Part);
+        PartClicked?.Invoke(hit.Cause.Part);
     }
 
     string Describe(Zone z)
