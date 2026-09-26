@@ -4,7 +4,7 @@ namespace Kashif;
 
 /// <summary>
 /// تحليل البانك — الشاشة الرئيسية للبرنامج (F2). لوحة من عمودين بلا تبويبات:
-/// العمود الأول: الخلاصة، ثم الفحص التفاعلي (أسئلة عن اختبارات عملية تعيد ترتيب الأسباب)، ثم الأسباب مرتبة.
+/// العمود الأول: الخلاصة، ثم الفحص التفاعلي (أسئلة عن اختبارات عملية تعيد ترتيب الأسباب)، ثم الأسباب مرتبة بجانب خريطة الجهاز.
 /// العمود الثاني: خطوات الفحص، ثم الأدلة من السجل (النقر على الدليل يفتح نص السجل مظللًا عند مكانه).
 /// قائمة السجلات جانبية تُطوى، وبقية التفاصيل (نص السجل، الزبون، التقرير، الخط الزمني، الفحوصات السابقة) في نوافذ عند الطلب.
 /// </summary>
@@ -22,6 +22,8 @@ public class AnalyzeForm : BaseForm
     readonly VerdictHero verdict = new() { Dock = DockStyle.Top, Height = 204, ShowTopCauses = false };
     readonly InterviewView interview = new() { Dock = DockStyle.Top, Height = 200 };
     readonly CardStack causes = new() { Dock = DockStyle.Fill, Padding = new Padding(2), EmptyText = "لا توجد أسباب — افتح سجل بانك" };
+    readonly DeviceMap map = new() { Dock = DockStyle.Left, Width = 230 };
+    readonly Panel mapGap = new() { Dock = DockStyle.Left, Width = 12, BackColor = Theme.Surface };
     readonly CardStack steps = new() { Dock = DockStyle.Fill, Padding = new Padding(2), EmptyText = "لا توجد خطوات" };
     readonly CardStack evidence = new() { Dock = DockStyle.Fill, Padding = new Padding(2), EmptyText = "لا توجد أدلة" };
     readonly CardPanel logsCard, causesCard, stepsCard, evidenceCard;
@@ -121,8 +123,12 @@ public class AnalyzeForm : BaseForm
         };
 
         // ---------- العمود الأول: الخلاصة، الفحص التفاعلي، الأسباب ----------
+        // خريطة الجهاز بجانب القائمة: أماكن القطع ملوّنة حسب الترتيب — تختفي حين يضيق العمود
         causesCard = new CardPanel { Dock = DockStyle.Fill, Title = "الأسباب مرتبة", IconName = "list-ordered", Subtitle = "الدرجة للترتيب — تتغير مع أجوبة الفحص" };
         causesCard.Controls.Add(causes);
+        causesCard.Controls.Add(mapGap);
+        causesCard.Controls.Add(map);
+        causesCard.Resize += (s, e) => FitMap();
         main = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Margin = new Padding(14, 0, 0, 0) };
         main.Controls.Add(causesCard);
         main.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 12, BackColor = Theme.Bg });
@@ -181,6 +187,7 @@ public class AnalyzeForm : BaseForm
         foreach (var t in new[] { tLiquid, tBattery, tFlex, tScreen, tDrop }) t.CheckedChanged += (s, e) => { if (!loading) { dirty = true; Reanalyze(); } };
         logsGrid.SelectionChanged += (s, e) => { if (!loading) ShowResult(); };
         interview.Clicked += OnInterview;
+        map.PartClicked += ShowCause;
         DragEnter += (s, e) => e.Effect = e.Data.GetDataPresent(DataFormats.FileDrop) || e.Data.GetDataPresent(DataFormats.UnicodeText) ? DragDropEffects.Copy : DragDropEffects.None;
         DragDrop += (s, e) => Drop(e.Data);
 
@@ -195,6 +202,18 @@ public class AnalyzeForm : BaseForm
         bLogs.Text = on ? "إخفاء السجلات" : "السجلات";
         bLogs.FitWidth(110);
         bLogs.Invalidate();
+    }
+
+    void FitMap()
+    {
+        bool on = causesCard.ClientSize.Width >= Dpi.S(560) && causesCard.ClientSize.Height >= Dpi.S(240);
+        if (map.Visible != on) { map.Visible = on; mapGap.Visible = on; }
+    }
+
+    /// <summary>النقر على قطعة في خريطة الجهاز: تمرير قائمة الأسباب إلى بطاقتها</summary>
+    void ShowCause(string part)
+    {
+        if (causes.Controls.OfType<CauseCard>().FirstOrDefault(c => c.Part == part) is { } card) causes.ScrollControlIntoView(card);
     }
 
     void FitInterview()
@@ -439,6 +458,7 @@ public class AnalyzeForm : BaseForm
             interview.Set(null, 0, Array.Empty<string>(), false);
             interview.Visible = false;
             causes.SetItems(Array.Empty<StackItem>());
+            map.Set(null);
             steps.SetItems(Array.Empty<StackItem>());
             evidence.SetItems(Array.Empty<StackItem>());
             UpdateButtons();
@@ -482,6 +502,7 @@ public class AnalyzeForm : BaseForm
         FitInterview();
 
         causes.SetItems(shown.Candidates.Select((c, k) => (StackItem)new CauseCard(k + 1, c)));
+        map.Set(shown);
         causesCard.Subtitle = shown.AnswersApplied > 0 ? $"مرتبة بعد {shown.AnswersApplied} من أجوبة الفحص" : "الدرجة للترتيب — تتغير مع أجوبة الفحص";
         steps.SetItems(shown.Steps.Select((s, k) =>
         {

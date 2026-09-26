@@ -69,6 +69,8 @@ public class CauseCard : StackItem
 
     public CauseCard(int rank, Candidate c) { this.rank = rank; this.c = c; }
 
+    public string Part => c.Part;
+
     static int S(int v) => Dpi.S(v);
     int InnerWidth(int width) => width - S(28) - S(40) - S(14);
 
