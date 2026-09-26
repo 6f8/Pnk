@@ -1,0 +1,31 @@
+{"bug_type":"210", "timestamp":"2026-09-21 02:53:31.00 -0700","os_version":"iPhone OS 27.0
+
+(24A437)","roots_installed":0,"incident_id":"3F390461-D748-432A-B90E-3ED6479DEC29"}
+
+{
+
+"crashReporterKey":
+
+"4e8ed2fecd31cd250805d279f713938d19728d75",
+
+"panic ProcessingFlags" : "0x0",
+
+"product": "iPhone12,1",
+
+"kernel": "Darwin Kernel Version 27.0.0: Thu Aug 13
+
+21:55:30 PDT 2026; root:xnu-13432.2.10~2/
+
+RELEASE_ARM64_T8030",
+
+"socRevision": "11",
+
+"panicString": "panic(cpu 0 caller 0xfffffff041e0b124):
+
+userspace watchdog timeout: no successful checkins from thermalmonitord (2 induced crashes) \nservice returned not alive with context: is_alive_func returned unhealthy: current 37fffffffffff, mask 1ffffffffffff, expected 1ffffffffffff.
+
+SD: 1 BC: 1 RC: -1 BS: 1, Missing sensor(s): Prs0 \nservice: backboardd, total successful checkins in 196 seconds: 19, last successful checkin: 0 seconds ago\nservice: SpringBoard, total successful checkins in 169 seconds: 17, last successful checkin: 0 seconds ago\nservice: audiomxd, total successful checkins in 196 seconds: 18, last successful checkin: 0 seconds ago\nservice: logd, total successful checkins in 196 seconds: 19, last successful checkin: 0 seconds ago\nservice: thermalmonitord (2 induced crashes), no successful checkins in 196 seconds\nservice: runningboardd, total successful checkins in 196 seconds: 19, last successful checkin: 0 seconds ago\nservice: wifid, total successful checkins in 196 seconds: 19, last successful checkin: 0 seconds ago\nservice: configd, total successful checkins in 196 seconds: 19, last successful checkin: 0 seconds ago\nservice: CommCenter, total successful checkins in 196 seconds: 18, last successful checkin: 0 seconds ago\n\nDebugger message: panic\nMemory ID: Oxff\nOS release type: User\nOS version: 24A437\nKernel version: Darwin Kernel Version 27.0.0: Thu Aug 13 21:55:30 PDT 2026; root:xnu-13432.2.10-2/RELEASE_ARM64_T8030\nFileset Kernelcache UUID: 89ACA0D9F2E496E9B95AC681CF41C386\nKernel UUID: B34FA6EE-3862-30B8-BFEB-0E0C25B9D326\nBoot session UUID: 3F390461-D748-432A-B90E-3ED6479DEC29\niBoot version:
+
+mBoot-20457.2.37\nsecure boot?: YES\nroots installed:
+
+0\nPaniclog version: 16\nDebug Header address: xfffffff020bc9000\nDebug Header entry count: 3\nTXM

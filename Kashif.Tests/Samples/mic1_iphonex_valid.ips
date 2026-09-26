@@ -1,0 +1,12 @@
+{"bug_type":"210","timestamp":"2026-09-20 10:00:00.00 +0300","os_version":"iPhone OS 18.6 (22G86)","roots_installed":0,"incident_id":"AAAAAAAA-1111-2222-3333-444444444444"}
+{
+  "build": "iPhone OS 18.6 (22G86)",
+  "product": "iPhone10,3",
+  "socId": "8015",
+  "kernel": "Darwin Kernel Version 24.6.0: ...; root:xnu-11417.140.69~1/RELEASE_ARM64_T8015",
+  "incident": "AAAAAAAA-1111-2222-3333-444444444444",
+  "crashReporterKey": "1111111111111111111111111111111111111111",
+  "date": "2026-09-20 10:00:00.00 +0300",
+  "panicString": "panic(cpu 1 caller 0xfffffff0171d1234): userspace watchdog timeout: no successful checkins from thermalmonitord (1 induced crashes)\nservice returned not alive with context: is_alive_func returned unhealthy : current 3ffffffff, mask 1ffffffff, expected 1ffffffff, SD: 1 BC: 1 RC: -1 BS: 1, Missing sensor(s): mic1 \nservice: logd, total successful checkins in 185 seconds: 18, last successful checkin: 0 seconds ago\nservice: thermalmonitord (1 induced crashes), no successful checkins in 185 seconds\nDebugger message: panic\n",
+  "panicFlags": "0x0"
+}
