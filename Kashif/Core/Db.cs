@@ -104,14 +104,10 @@ public static class Db
         }
     }
 
-    /// <summary>ترقية قواعد البيانات القديمة: إضافة الأعمدة الجديدة إن لم تكن موجودة</summary>
+    /// <summary>ترقية قواعد البيانات القديمة: إضافة الأعمدة الجديدة إن لم تكن موجودة (القائمة في StoreSql.Migrations)</summary>
     static void Migrate(Tx t)
     {
-        var cols = new (string Table, string Col, string Def)[]
-        {
-            // لا ترقيات بعد — الإصدار الأول. أضف هنا أي عمود جديد: (الجدول، العمود، النوع)
-        };
-        foreach (var (table, col, def) in cols)
+        foreach (var (table, col, def) in StoreSql.Migrations)
         {
             bool exists = t.Query($"PRAGMA table_info({table})").Rows.Cast<DataRow>().Any(r => S(r["name"]) == col);
             if (!exists) t.Exec($"ALTER TABLE {table} ADD COLUMN {col} {def}");
@@ -130,29 +126,8 @@ public static class Db
         t.Exec("INSERT INTO users(username,pass_hash,full_name,is_admin) VALUES('admin',@p0,'المدير',1)", Session.HashPassword("admin"));
     }
 
-    const string Indexes = @"
-CREATE INDEX IF NOT EXISTS ix_analyses_date ON analyses(date);
-CREATE INDEX IF NOT EXISTS ix_analyses_device_key ON analyses(device_key);
-CREATE INDEX IF NOT EXISTS ix_analyses_kind ON analyses(kind);
-CREATE INDEX IF NOT EXISTS ix_audit_date ON audit_log(date);";
-
-    const string Schema = @"
-CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT);
-CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, username TEXT UNIQUE NOT NULL, pass_hash TEXT NOT NULL,
-    full_name TEXT, is_admin INTEGER DEFAULT 0, active INTEGER DEFAULT 1);
-CREATE TABLE IF NOT EXISTS user_perms(user_id INTEGER, perm TEXT, PRIMARY KEY(user_id,perm));
-CREATE TABLE IF NOT EXISTS audit_log(id INTEGER PRIMARY KEY, date TEXT, user_id INTEGER, action TEXT, details TEXT);
-
--- سجل الفحوصات: كل تحليل محفوظ مع نص السجلات الأصلي (يُعاد تحليله لاحقًا بقاعدة معرفة أحدث)
-CREATE TABLE IF NOT EXISTS analyses(id INTEGER PRIMARY KEY, date TEXT NOT NULL, user_id INTEGER,
-    customer TEXT, phone TEXT, device TEXT, product TEXT, device_key TEXT, ios TEXT, panic_time TEXT,
-    kind TEXT, title TEXT, top_part TEXT, confidence TEXT, logs INTEGER DEFAULT 1, flags TEXT,
-    result TEXT, notes TEXT, raw TEXT, status TEXT DEFAULT 'قيد الفحص');
-
--- خبرة المحل: نص يظهر في السجل (أو رمز حساس) ← القطعة التي كانت السبب فعلًا
-CREATE TABLE IF NOT EXISTS kb_rules(id INTEGER PRIMARY KEY, name TEXT NOT NULL, pattern TEXT NOT NULL, device TEXT,
-    part TEXT NOT NULL, level TEXT DEFAULT 'شائع', note TEXT, active INTEGER DEFAULT 1);
-";
+    const string Indexes = StoreSql.Indexes;
+    const string Schema = StoreSql.Schema;
 }
 
 /// <summary>معاملة (Transaction) — كل عملية مركبة تُحفظ كاملة أو لا تُحفظ.</summary>

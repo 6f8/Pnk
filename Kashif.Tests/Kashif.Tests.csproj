@@ -8,7 +8,12 @@
     <RootNamespace>Kashif.Tests</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <!-- قاعدة بيانات حقيقية لاختبار الحفظ والفتح والتقارير (StoreSql) -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.8" />
+  </ItemGroup>
+  <ItemGroup>
     <Compile Include="..\Kashif\Core\Panic\*.cs" Link="Engine\%(Filename)%(Extension)" />
+    <EmbeddedResource Include="..\Kashif\Data\knowledge.json" LogicalName="Kashif.knowledge.json" />
     <None Include="Samples\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -68,10 +68,10 @@ public class HistoryForm : BaseForm
         var st = cbStatus.SelectedIndex > 0 ? cbStatus.Text : "";
         long keep = SelectedId();
         grid.DataSource = Db.Query(@"SELECT id, date AS [التاريخ], customer AS [الزبون], phone AS [الهاتف], device AS [الجهاز],
-                title AS [التشخيص], top_part AS [الأرجح], confidence AS [الثقة], status AS [الحالة], logs AS [السجلات]
+                title AS [التشخيص], top_part AS [الأرجح], IFNULL(fixed_part,'') AS [القطعة المُصلِحة], confidence AS [الثقة], status AS [الحالة], logs AS [السجلات]
             FROM analyses
             WHERE (@p0='' OR customer LIKE @p1 OR phone LIKE @p1 OR device LIKE @p1 OR product LIKE @p1 OR title LIKE @p1
-                   OR top_part LIKE @p1 OR kind LIKE @p1 OR notes LIKE @p1 OR device_key=@p0)
+                   OR top_part LIKE @p1 OR fixed_part LIKE @p1 OR kind LIKE @p1 OR notes LIKE @p1 OR device_key=@p0 OR signature=@p0)
               AND (@p2='' OR status=@p2) AND date BETWEEN @p3 AND @p4
             ORDER BY id DESC LIMIT 2000",
             q, "%" + q + "%", st, from.Value.ToString(Ui.DFmt), to.Value.ToString(Ui.DFmt) + " 23:59:59");

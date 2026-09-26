@@ -19,11 +19,14 @@ public class DashboardForm : BaseForm
         // ---------- المؤشرات ----------
         var kpis = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 140, WrapContents = false, Padding = new Padding(0, 4, 0, 0) };
         var top = Stats.TopPart();
+        var acc = Stats.Accuracy();
         var cards = new[]
         {
             Kpi("فحوصات اليوم", Stats.Today().ToString("#,0"), Theme.Orange, "scan-line", "تحليل محفوظ اليوم", HistoryForm.PageTitle),
             Kpi("أجهزة قيد الفحص", Stats.Open().ToString("#,0"), Theme.Warning, "wrench", "قيد الفحص أو بانتظار قطعة", HistoryForm.PageTitle),
             Kpi("كل الفحوصات", Stats.Total().ToString("#,0"), Theme.Info, "history", "في سجل الفحوصات", HistoryForm.PageTitle),
+            Kpi("دقة التشخيص", acc.Count == 0 ? "—" : $"{acc.Percent:0}%", Theme.Success, "badge-check",
+                acc.Count == 0 ? "سجّل القطعة المُصلِحة في الفحوصات" : $"الأرجح كان صحيحًا — من {acc.Count} فحص بنتيجة", "دقة التشخيص"),
             Kpi("الأكثر تكرارًا", top == "" ? "—" : top, Theme.Purple, "trending-up", "القطعة الأرجح في آخر 30 يومًا", "الأعطال الأكثر تكرارًا"),
         };
         kpis.Controls.AddRange(cards);
@@ -35,7 +38,7 @@ public class DashboardForm : BaseForm
 
         // ---------- المخطط ----------
         var mid = new Panel { Dock = DockStyle.Top, Height = 300, Padding = new Padding(0, 6, 0, 8) };
-        var chartCard = new CardPanel { Dock = DockStyle.Fill, Title = "القطع الأكثر تسببًا بالبانك", Subtitle = $"القطعة الأرجح في فحوصات آخر 90 يومًا — خبرة المحل: {Stats.Rules()} قاعدة", IconName = "chart-column" };
+        var chartCard = new CardPanel { Dock = DockStyle.Fill, Title = "القطع الأكثر تسببًا بالبانك", Subtitle = $"القطعة المُصلِحة (أو الأرجح إن لم تُسجّل) في آخر 90 يومًا — خبرة المحل: {Stats.Rules()} قاعدة", IconName = "chart-column" };
         var chart = new BarChart { Dock = DockStyle.Fill, HighlightLast = false };
         foreach (var p in Stats.PartsChart()) chart.Data.Add(p);
         chartCard.Controls.Add(chart);

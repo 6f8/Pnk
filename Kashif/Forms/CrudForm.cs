@@ -27,6 +27,8 @@ public class EntityDef
     public Func<long, string> DeleteWarning;
     /// <summary>تحقق قبل الحفظ: يعيد رسالة الخطأ أو null (يُمرَّر له قارئ قيمة الحقل باسمه)</summary>
     public Func<Func<string, object>, string> Check;
+    /// <summary>أزرار إضافية بجانب «حفظ» تعمل على القيم الحالية في الحقول (مثل «تجربة القاعدة»)</summary>
+    public List<(string Caption, string Icon, Action<Func<string, object>> Run)> FormActions = new();
     /// <summary>أزرار في كل سطر من الجدول</summary>
     public List<(string Caption, Action<long> Run)> RowActions = new();
 }
@@ -64,11 +66,17 @@ public class CrudForm : BaseForm
         var bNew = new ModernButton { Text = "جديد", IconName = "plus", Height = 44 };
         var bSave = new ModernButton { Text = "حفظ", IconName = "save", Height = 44 };
         bDel = new ModernButton { Text = "حذف", IconName = "trash-2", Kind = BtnKind.Coral, Height = 44 };
-        var order = new[] { bNew, bSave, bDel };
+        var extra = def.FormActions.Select(a =>
+        {
+            var b = new ModernButton { Text = a.Caption, IconName = a.Icon, Kind = BtnKind.Secondary, Height = 44 };
+            b.Click += (s, e) => a.Run(name => GetValue(def.Fields.First(f => f.Name == name)));
+            return b;
+        });
+        var order = new[] { bNew, bSave, bDel }.Concat(extra).ToArray();
         actions.Controls.AddRange(order);
         actions.Resize += (s, e) =>
         {
-            int w = Math.Min(Dpi.S(150), (actions.ClientSize.Width - Dpi.S(16)) / 3), x = actions.ClientSize.Width;
+            int w = Math.Min(Dpi.S(150), (actions.ClientSize.Width - Dpi.S(16)) / order.Length), x = actions.ClientSize.Width;
             foreach (var b in order) { x -= w; b.SetBounds(x, Dpi.S(12), w - Dpi.S(8), Dpi.S(44)); }
         };
         card.Controls.Add(editor);
@@ -344,6 +352,7 @@ public static class Defs
     {
         Table = "kb_rules", Title = "خبرة المحل", Perm = "kb", Icon = "lightbulb",
         ListSql = @"SELECT id, name AS [الوصف], pattern AS [النص في السجل], IFNULL(device,'') AS [الجهاز], part AS [القطعة / السبب], level AS [الدرجة],
+            IFNULL(priority,0) AS [الأولوية], CASE IFNULL(is_regex,0) WHEN 1 THEN 'Regex' ELSE 'نص' END AS [النمط],
             CASE active WHEN 1 THEN 'فعّالة' ELSE 'متوقفة' END AS [الحالة] FROM kb_rules",
         SearchWhere = "[الوصف] LIKE @p0 OR [النص في السجل] LIKE @p0 OR [القطعة / السبب] LIKE @p0 OR [الجهاز] LIKE @p0",
         Fields =
@@ -353,16 +362,47 @@ public static class Defs
             F("device", "الجهاز (اختياري)"),
             C("part", "* القطعة أو السبب", true, KnownParts),
             C("level", "الدرجة", false, CustomRule.Levels).With("شائع"),
+            F("priority", "الأولوية (-20 إلى 20)", FType.Number, 0.0),
+            F("is_regex", "النمط تعبير منتظم (Regex)", FType.Bool, 0L),
             F("note", "ملاحظة", FType.Memo),
             F("active", "القاعدة فعّالة", FType.Bool, 1L),
         },
         Check = get =>
         {
-            if (Db.S(get("pattern")).Trim().Length < 3) return "اكتب نصًا من السجل (3 أحرف على الأقل) أو رمز الحساس، مثل Prs0 أو SMC PANIC.";
-            if (Db.S(get("part")).Trim() == "") return "اختر القطعة أو السبب.";
+            var rule = RuleFrom(get);
+            if (rule.Pattern.Length < 3) return "اكتب نصًا من السجل (3 أحرف على الأقل) أو رمز الحساس، مثل Prs0 أو SMC PANIC.";
+            if (rule.Part == "") return "اختر القطعة أو السبب.";
+            if (Db.D(get("priority")) is < -20 or > 20) return "الأولوية بين -20 و 20.";
+            if (rule.PatternError() is string err) return "التعبير المنتظم غير صالح: " + err;
             return null;
         },
+        FormActions =
+        {
+            ("تجربة القاعدة", "list-checks", get =>
+            {
+                var rule = RuleFrom(get);
+                if (rule.Pattern.Length < 3 || rule.Part == "") { Ui.Warn("اكتب النمط واختر القطعة أولًا."); return; }
+                if (rule.PatternError() is string err) { Ui.Warn("التعبير المنتظم غير صالح: " + err); return; }
+                var t = PanicStore.TestRule(rule);
+                Dialogs.Message(
+                    $"جُرّبت القاعدة على {t.Checked} فحص محفوظ.\n\n" +
+                    $"تطابق: {t.Matched}\n" +
+                    $"أُصلحت بنفس القطعة ({rule.Part}): {t.SamePart}\n" +
+                    $"أُصلحت بقطعة أخرى: {t.OtherPart}\n" +
+                    $"بلا نتيجة مسجّلة: {t.NoOutcome}" +
+                    (t.Ids.Count > 0 ? "\n\nأرقام الفحوصات المطابقة: " + string.Join("، ", t.Ids.Take(20)) + (t.Ids.Count > 20 ? " ..." : "") : ""),
+                    "تجربة القاعدة", t.OtherPart > t.SamePart ? Tone.Warning : Tone.Info);
+            }),
+        },
         AfterSave = id => { if (id > 0) Db.Audit("خبرة المحل", Db.S(Db.Scalar("SELECT name || ': ' || pattern || ' ← ' || part FROM kb_rules WHERE id=@p0", id))); },
+    };
+
+    /// <summary>قاعدة من قيم الحقول الحالية (للتحقق والتجربة قبل الحفظ)</summary>
+    static CustomRule RuleFrom(Func<string, object> get) => new()
+    {
+        Name = Db.S(get("name")).Trim(), Pattern = Db.S(get("pattern")).Trim(), Device = Db.S(get("device")).Trim(),
+        Part = Db.S(get("part")).Trim(), Level = Db.S(get("level")), Note = Db.S(get("note")),
+        IsRegex = Db.L(get("is_regex")) == 1, Priority = (int)Math.Clamp(Db.L(get("priority")), -20, 20),
     };
 
     static Field With(this Field f, object def) { f.Default = def; return f; }

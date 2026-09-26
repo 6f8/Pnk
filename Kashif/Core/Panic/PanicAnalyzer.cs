@@ -4,6 +4,9 @@ using System.Text.RegularExpressions;
 
 namespace Kashif;
 
+/// <summary>سطر في الخط الزمني لسجلات الجهاز (التحليل المجمّع)</summary>
+public sealed record TimelineItem(DateTimeOffset? Time, string TimeText, string Kind, string Title, string TopPart, string Signature, string Source);
+
 /// <summary>نتيجة تحليل سجل (أو عدة سجلات لنفس الجهاز)</summary>
 public sealed class Diagnosis
 {
@@ -22,15 +25,30 @@ public sealed class Diagnosis
     public string WatchdogService = "";
     public int WatchdogSeconds;
     public List<string> SmcKeys = new();
+    /// <summary>موضع فشل SMC (مثل target/d94/target.cpp:250) ورقم المهمة التي توقفت داخله</summary>
+    public string SmcAssert = "", FaultingTask = "";
+    /// <summary>خانات «S.sensor array» غير الصفرية (قيم خام من SMC — معناها غير موثّق، تُحفظ للمقارنة)</summary>
+    public List<(int Index, long Value)> SensorArray = new();
+    /// <summary>
+    /// بصمة النمط للتعلّم من نتائج المحل: sensor:Prs0 أو smc:target/d94/target.cpp:250 أو service:wifid أو kind:AOP.
+    /// فحصان بنفس البصمة = نفس نوع العطل من ناحية السجل.
+    /// </summary>
+    public string Signature = "";
+    /// <summary>نص يمكن أن تطابقه قاعدة في «خبرة المحل» لهذا النمط (رمز الحساس، اسم الخدمة، موضع ASSERT) — فارغ إن لم يوجد</summary>
+    public string LearnPattern = "";
+    /// <summary>أماكن الحساس من معلومة خاصة بهذا الموديل (وليس الجيل)</summary>
+    public bool ModelSpecific;
     /// <summary>عدد السجلات التي بُني عليها التحليل (أكثر من 1 في التحليل المجمّع)</summary>
     public int LogCount = 1;
+    /// <summary>الخط الزمني للسجلات (في التحليل المجمّع) مرتبًا من الأقدم</summary>
+    public List<TimelineItem> Timeline = new();
 
     public string TopPart => Candidates.Count > 0 ? Candidates[0].Part : "";
     public string TopLabel => Candidates.Count > 0 ? Candidates[0].Label : "";
 }
 
 /// <summary>
-/// محرك التحليل: يستخرج الحقائق من نص البانك (الحساس المفقود، الخدمة المتوقفة، مفاتيح SMC، نوع الانهيار)،
+/// محرك التحليل: يستخرج الحقائق من نص البانك (الحساس المفقود، الخدمة المتوقفة، مفاتيح SMC وموضع فشله، نوع الانهيار)،
 /// ثم يرتب الأسباب المحتملة حسب قاعدة المعرفة وخبرة المحل ومعلومات الحالة.
 /// لا يعتمد على الواجهة ولا قاعدة البيانات — يُختبر وحده.
 /// </summary>
@@ -40,10 +58,15 @@ public static class PanicAnalyzer
     static readonly Regex Missing = new(@"Missing\s*sensor\s*\(\s*s\s*\)\s*:\s*([^\n]*)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     /// <summary>رمز حساس: حرف ثم حروف/أرقام وفيه رقم واحد على الأقل (Prs0، mic1، TG0B) — فلا تُقرأ كلمات السطر التالي كرموز</summary>
     static readonly Regex SensorToken = new(@"^(?=.*\d)[A-Za-z][A-Za-z0-9]{1,5}$", RegexOptions.Compiled);
+    /// <summary>رمز منسوخ من صورة قد يحمل O بدل 0 أو l بدل 1 (PrsO، micl)</summary>
+    static readonly Regex OcrSensorToken = new(@"^[A-Za-z][A-Za-z0-9]{1,5}$", RegexOptions.Compiled);
     static readonly Regex NoCheckinsFrom = new(@"no successful checkins from\s+([A-Za-z0-9_.\-]+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     static readonly Regex InducedCrashes = new(@"\((\d+)\s+induced crash", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     static readonly Regex SmcPanic = new(@"SMC PANIC\s*-?\s*([^\n]*)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     static readonly Regex SmcAssert = new(@"ASSERT\s*:\s*([^\n]*)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    static readonly Regex AssertLocation = new(@"ASSERT\s*:\s*([A-Za-z0-9_./\\-]+\.(?:c|cpp|cc|h|m)\s*:\s*\d+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    static readonly Regex FaultingTaskRx = new(@"Faulting task\s+(\d+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    static readonly Regex SensorArrayRx = new(@"S\.sensor array\s*(\d+)\s*-\s*(\d+)\s*is\s*([^\n]*)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     static readonly Regex Outbox = new(@"OUTBOX\d*\s+not ready", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     static readonly Regex Hex64 = new(@"0x([0-9a-fA-F]{16})(?![0-9a-fA-F])", RegexOptions.Compiled);
     static readonly Regex RtkitClient = new(@"Client:\s*([A-Za-z0-9_.\-]+)", RegexOptions.Compiled);
@@ -60,17 +83,9 @@ public static class PanicAnalyzer
         d.Headline = Headline.Match(ps) is { Success: true } hm ? hm.Groups[1].Value.Trim()
             : ps.Split('\n').Select(x => x.Trim()).FirstOrDefault(x => x != "") ?? "";
         if (d.Headline.Length > 220) d.Headline = d.Headline[..220] + "…";
-        if (d.Headline != "") d.Evidence.Add(new("سطر الانهيار", d.Headline, "أول سطر في نص البانك: ما الذي أوقف الجهاز"));
+        if (d.Headline != "") d.Evidence.Add(new("سطر الانهيار", d.Headline, "أول سطر في نص البانك: ما الذي أوقف الجهاز", Cut(d.Headline, 50)));
 
-        // الرموز حتى أول كلمة ليست رمزًا (إذا ضاعت أسطر النسخ يلتصق بعدها «service: ...» على نفس السطر)
-        foreach (Match m in Missing.Matches(ps))
-            foreach (var tok in Regex.Split(m.Groups[1].Value.Trim(), @"[\s,;]+"))
-            {
-                var t = tok.Trim().Trim('"', '\'', '.', ')', '(');
-                if (t == "") continue;
-                if (!SensorToken.IsMatch(t)) break;
-                if (!d.MissingSensors.Contains(t, StringComparer.OrdinalIgnoreCase)) d.MissingSensors.Add(t);
-            }
+        ReadSensors(d, ps);
 
         if (NoCheckinsFrom.Match(ps) is { Success: true } wm)
         {
@@ -78,22 +93,22 @@ public static class PanicAnalyzer
             d.WatchdogSeconds = SecondsFor(ps, d.WatchdogService);
             var induced = InducedCrashes.Match(ps);
             d.Evidence.Add(new("خدمة متوقفة", d.WatchdogService + (induced.Success ? $" ({induced.Groups[1].Value} إعادة تشغيل قسرية)" : ""),
-                "مراقب النظام أعاد تشغيل الجهاز لأن هذه الخدمة لم تسجّل حضورها"));
+                "مراقب النظام أعاد تشغيل الجهاز لأن هذه الخدمة لم تسجّل حضورها", "checkins from " + d.WatchdogService));
             if (d.WatchdogSeconds > 0)
-                d.Evidence.Add(new("مدة الانتظار", d.WatchdogSeconds + " ثانية", RestartText(d.WatchdogSeconds)));
+                d.Evidence.Add(new("مدة الانتظار", d.WatchdogSeconds + " ثانية", RestartText(d.WatchdogSeconds), "checkins in " + d.WatchdogSeconds));
         }
 
         bool smc = SmcPanic.IsMatch(ps);
         if (smc) ReadSmc(d, ps);
         if (RtkitClient.Match(ps) is { Success: true } rc)
-            d.Evidence.Add(new("المعالج المساعد", rc.Groups[1].Value, "برنامج المعالج المساعد الذي انهار (RTKit)"));
+            d.Evidence.Add(new("المعالج المساعد", rc.Groups[1].Value, "برنامج المعالج المساعد الذي انهار (RTKit)", "Client:"));
 
         // ---------- التشخيص الأساسي ----------
         var others = PanicKnowledge.Signatures.Where(s => s.Match.IsMatch(ps)).ToList();
         if (d.MissingSensors.Count > 0) SensorDiagnosis(d, log, ps);
         else if (smc) SmcDiagnosis(d);
         else if (d.WatchdogService != "" && PanicKnowledge.FindService(d.WatchdogService) is { } svc) ServiceDiagnosis(d, svc);
-        else if (others.Count > 0) { SignatureDiagnosis(d, others[0]); others.RemoveAt(0); }
+        else if (others.Count > 0) { SignatureDiagnosis(d, others[0], ps); others.RemoveAt(0); }
         else if (d.WatchdogService != "") UnknownService(d);
         else if (GenericWatchdog.IsMatch(ps)) GenericWatchdogDiagnosis(d);
         else Unknown(d, ps);
@@ -101,20 +116,32 @@ public static class PanicAnalyzer
         // تواقيع أخرى في نفس السجل: أدلة إضافية وأسباب بدرجة أقل
         foreach (var s in others.Where(s => s.Kind != d.Kind))
         {
-            d.Evidence.Add(new("علامة إضافية", s.Title, s.Explain));
+            d.Evidence.Add(new("علامة إضافية", s.Title, s.Explain, s.Match.Match(ps).Value));
             foreach (var c in s.Choices) Add(d, c.Part, c.Score - 20, c.Why);
+        }
+
+        // ---------- جهاز معدّل ----------
+        if (log.Rooted && d.Candidates.Count > 0)
+        {
+            Add(d, Parts.Ios, 55, "الجهاز معدّل (جيلبريك): التعديلات البرمجية سبب شائع للبانك");
+            Bump(d, Parts.Ios, 10, "roots installed غير صفر");
+            d.Evidence.Add(new("جهاز معدّل", "roots installed = " + log.RootsInstalled, "الجيلبريك والتعديلات البرمجية تسبب بانكات لا علاقة لها بالقطع", "roots"));
         }
 
         // ---------- ملاحظات القراءة ----------
         d.Warnings.AddRange(log.Notes);
         if (log.BugType != "" && log.BugType != "210") d.Warnings.Add($"bug_type = {log.BugType}: {d.BugInfo}. ملف البانك الصحيح يبدأ اسمه بـ panic-full.");
         if (d.Product == "" && d.Device == "") d.Warnings.Add("لم يُعرف موديل الجهاز من السجل (لا يوجد حقل product).");
+        if (AppleDevices.IsIPad(d.Product) && d.MissingSensors.Count > 0)
+            d.Warnings.Add("جهاز iPad: أماكن الحساسات تختلف عن الآيفون، فالترتيب مبني على الأماكن العامة — تأكد من مخطط الجهاز.");
 
         ApplyFlags(d, flags);
         ApplyCustom(d, custom);
         Rank(d);
         return d;
     }
+
+    static string Cut(string s, int n) => string.IsNullOrEmpty(s) ? "" : s.Length > n ? s[..n] : s;
 
     static void Identify(Diagnosis d, PanicLog log, string ps)
     {
@@ -123,13 +150,45 @@ public static class PanicAnalyzer
         if (d.Product == "" && AppleDevices.BoardProduct(ps) is { } bp)
         {
             d.Product = bp;
-            d.Evidence.Add(new("رمز البوردة", AppleDevices.BoardCode(ps), "عُرف الجهاز من رمز البوردة في نص البانك"));
+            d.Evidence.Add(new("رمز البوردة", AppleDevices.BoardCode(ps), "عُرف الجهاز من رمز البوردة في نص البانك", "target"));
         }
         d.Soc = log.SocCode is var sc && sc != "" ? (AppleDevices.SocName(sc) is var sn && sn != "" ? $"{sn} ({sc})" : sc) : "";
         d.Ios = log.IosVersion;
         d.Build = log.IosBuild;
         d.Time = log.Timestamp;
         d.BugInfo = PanicKnowledge.BugTypeInfo(log.BugType);
+    }
+
+    /// <summary>
+    /// رموز «Missing sensor(s)» حتى أول كلمة ليست رمزًا (إذا ضاعت أسطر النسخ يلتصق بعدها «service: ...» على نفس السطر).
+    /// الرمز غير المعروف الذي يصبح معروفًا بتصحيح O←0 أو l/I←1 يُصحَّح ويُذكر ذلك في الأدلة.
+    /// </summary>
+    static void ReadSensors(Diagnosis d, string ps)
+    {
+        foreach (Match m in Missing.Matches(ps))
+            foreach (var tok in Regex.Split(m.Groups[1].Value.Trim(), @"[\s,;]+"))
+            {
+                var t = tok.Trim().Trim('"', '\'', '.', ')', '(');
+                if (t == "") continue;
+                if (PanicKnowledge.FindSensor(t) == null && OcrSensorToken.IsMatch(t) && FixSensor(t) is { } fixedCode)
+                {
+                    d.Evidence.Add(new("تصحيح رمز", $"{t} ← {fixedCode}", "خطأ نسخ من صورة (O بدل 0 أو l بدل 1) — صُحّح لأنه يطابق رمزًا معروفًا", t));
+                    t = fixedCode;
+                }
+                else if (!SensorToken.IsMatch(t)) break;
+                if (!d.MissingSensors.Contains(t, StringComparer.OrdinalIgnoreCase)) d.MissingSensors.Add(t);
+            }
+    }
+
+    static string FixSensor(string t)
+    {
+        var candidates = new[]
+        {
+            t.Replace('O', '0').Replace('o', '0'),
+            t.Replace('l', '1').Replace('I', '1'),
+            t.Replace('O', '0').Replace('o', '0').Replace('l', '1').Replace('I', '1'),
+        };
+        return candidates.Where(c => c != t).Select(PanicKnowledge.FindSensor).FirstOrDefault(s => s != null)?.Code;
     }
 
     /// <summary>ثواني الانتظار في سطر الخدمة نفسها: «service: X ..., no successful checkins in 196 seconds»</summary>
@@ -149,18 +208,42 @@ public static class PanicAnalyzer
     {
         var line = SmcPanic.Match(ps).Groups[1].Value.Trim();
         if (!d.Headline.Contains("SMC PANIC", StringComparison.OrdinalIgnoreCase))
-            d.Evidence.Add(new("بانك SMC", line == "" ? "SMC PANIC" : line, "معالج SMC (الطاقة والحرارة والحساسات) انهار"));
+            d.Evidence.Add(new("بانك SMC", line == "" ? "SMC PANIC" : line, "معالج SMC (الطاقة والحرارة والحساسات) انهار", "SMC PANIC"));
         if (SmcAssert.Match(ps) is { Success: true } a && !line.Contains(a.Groups[1].Value.Trim(), StringComparison.Ordinal))
-            d.Evidence.Add(new("شرط فشل (ASSERT)", a.Groups[1].Value.Trim(), "المكان داخل برنامج SMC الذي توقف عنده"));
+            d.Evidence.Add(new("شرط فشل (ASSERT)", a.Groups[1].Value.Trim(), "المكان داخل برنامج SMC الذي توقف عنده", "ASSERT"));
+        if (AssertLocation.Match(ps) is { Success: true } loc)
+        {
+            d.SmcAssert = Regex.Replace(loc.Groups[1].Value, @"\s+", "").Replace('\\', '/');
+            d.Evidence.Add(new("موضع الفشل", d.SmcAssert, "الملف والسطر داخل برنامج SMC — نفس الموضع في عدة فحوصات يعني نفس نوع العطل", d.SmcAssert.Split('/').Last()));
+        }
+        if (FaultingTaskRx.Match(ps) is { Success: true } ft)
+        {
+            d.FaultingTask = ft.Groups[1].Value;
+            d.Evidence.Add(new("المهمة المتوقفة", "Faulting task " + d.FaultingTask, "رقم داخلي لمهمة SMC التي توقفت — معناه غير موثّق، ويُستخدم لمطابقة السجلات المتشابهة", "Faulting task"));
+        }
+        if (SensorArrayRx.Match(ps) is { Success: true } sa)
+        {
+            int start = int.Parse(sa.Groups[1].Value, CultureInfo.InvariantCulture);
+            var values = sa.Groups[3].Value.Split(',').Select(v => v.Trim().Replace('O', '0').Replace('o', '0')).ToList();
+            for (int i = 0; i < values.Count; i++)
+                if (long.TryParse(values[i], NumberStyles.Integer, CultureInfo.InvariantCulture, out var val) && val != 0) d.SensorArray.Add((start + i, val));
+            if (d.SensorArray.Count > 0)
+                d.Evidence.Add(new("مصفوفة حساسات SMC", string.Join("، ", d.SensorArray.Select(x => $"الخانة {x.Index} = {x.Value} (0x{x.Value:X})")),
+                    "قيم خام غير صفرية من SMC — معناها غير موثّق بعد، فلا تُستخدم في الترتيب؛ تُحفظ لمقارنة الفحوصات المتشابهة", "S.sensor array"));
+        }
         if (AppleDevices.BoardCode(ps) is var board && board != "")
-            d.Evidence.Add(new("رمز البوردة", board, "من مسار برنامج SMC في السجل"));
+            d.Evidence.Add(new("رمز البوردة", board, "من مسار برنامج SMC في السجل", "target"));
         if (Outbox.IsMatch(ps))
-            d.Evidence.Add(new("OUTBOX not ready", "نعم", "SMC توقف عن الرد على المعالج الرئيسي فأُعيد تشغيل الجهاز"));
+            d.Evidence.Add(new("OUTBOX not ready", "نعم", "SMC توقف عن الرد على المعالج الرئيسي فأُعيد تشغيل الجهاز", "OUTBOX"));
         foreach (var key in DecodeSmcKeys(ps))
             if (!d.SmcKeys.Contains(key)) d.SmcKeys.Add(key);
         if (d.SmcKeys.Count > 0)
+        {
+            var first = d.SmcKeys.FirstOrDefault(PanicKnowledge.IsBatteryKey) ?? d.SmcKeys[0];
             d.Evidence.Add(new("آخر مفاتيح SMC", string.Join("، ", d.SmcKeys),
-                "فُكّت من رسائل Mailbox: " + string.Join("، ", d.SmcKeys.Select(k => $"{k} = {PanicKnowledge.SmcKeyMeaning(k)}"))));
+                "فُكّت من رسائل Mailbox: " + string.Join("، ", d.SmcKeys.Select(k => $"{k} = {PanicKnowledge.SmcKeyMeaning(k)}")),
+                "0x" + Convert.ToHexString(Encoding.ASCII.GetBytes(first))));
+        }
     }
 
     /// <summary>
@@ -192,14 +275,17 @@ public static class PanicAnalyzer
     {
         d.Kind = "SMC";
         d.Title = "انهيار معالج الطاقة والحساسات (SMC)";
-        var battery = d.SmcKeys.Where(PanicKnowledge.IsBatteryKey).ToList();
-        if (battery.Count > 0)
+        d.Signature = "smc:" + (d.SmcAssert != "" ? d.SmcAssert : "?") + (d.FaultingTask != "" ? "|task" + d.FaultingTask : "");
+        d.LearnPattern = d.SmcAssert;
+        // المفاتيح المؤكدة بالاسم (TG0B، B0AV ...) دليل قوي؛ المفاتيح التي تبدأ بـ B فقط دليل ضعيف
+        var strong = d.SmcKeys.Where(PanicKnowledge.IsBatteryKey).ToList();
+        var weak = d.SmcKeys.Where(PanicKnowledge.IsWeakBatteryKey).ToList();
+        if (strong.Count > 0)
         {
-            // المفاتيح المعروفة بالاسم أولًا (مثل B0AV وTG0B)، ثم بقية مفاتيح البطارية
-            var named = battery.Where(PanicKnowledge.SmcKeys.ContainsKey).Select(k => $"{k} = {PanicKnowledge.SmcKeys[k]}").ToList();
-            d.Explanation = "معالج SMC توقف أثناء قراءة بيانات البطارية (" + string.Join("، ", named.Count > 0 ? named : battery) +
+            d.Signature += "|battery";
+            d.Explanation = "معالج SMC توقف أثناء قراءة بيانات البطارية (" + string.Join("، ", strong.Select(k => $"{k} = {PanicKnowledge.SmcKeyMeaning(k)}")) +
                 "). انقطاع الاتصال بشريحة قياس البطارية أو بحساس حرارتها هو السبب الأشيع لهذا الشكل.";
-            Add(d, Parts.Battery, 75, "آخر ما قرأه SMC قبل الانهيار كان بيانات البطارية");
+            Add(d, Parts.Battery, 75, "آخر ما قرأه SMC قبل الانهيار كان بيانات البطارية (" + string.Join("، ", strong) + ")");
             Add(d, Parts.BatteryConn, 65, "موصل غير محكم أو متأكسد يقطع الاتصال");
             Add(d, Parts.SmcLine, 42, "إذا بقي البانك مع بطارية سليمة وموصل نظيف");
             Add(d, Parts.ChargingFlex, 38, "بعض خطوط الطاقة والحساسات تمر عبرها");
@@ -214,6 +300,19 @@ public static class PanicAnalyzer
                 "إذا استمر: فحص خط الاتصال بين SMC وشريحة قياس البطارية على البوردة.",
             });
         }
+        else if (weak.Count > 0)
+        {
+            d.Signature += "|b?";
+            d.Explanation = "معالج SMC توقف، وآخر المفاتيح المقروءة تبدأ بحرف B (" + string.Join("، ", weak) +
+                ") وهو حرف مفاتيح البطارية في تسمية Apple — لكنها ليست مفاتيح موثّقة بالاسم، فالدليل ضعيف.";
+            Add(d, Parts.Battery, 58, "مفاتيح تبدأ بـ B (غير موثّقة بالاسم)");
+            Add(d, Parts.BatteryConn, 52, "موصل البطارية");
+            Add(d, Parts.Board, 50, "SMC أو خطوطه على البوردة");
+            Add(d, Parts.ChargingFlex, 40, "خطوط الطاقة والحساسات");
+            d.Confidence = "منخفضة";
+            d.Summary = "SMC انهار، والدليل على البطارية ضعيف ← جرّب البطارية ثم البوردة.";
+            d.Steps.AddRange(new[] { "جرّب بطارية سليمة أو مصدر طاقة DC.", "جرّب فلاتة شحن سليمة.", "اجمع عدة سجلات: تكرار نفس موضع الفشل يحدد القطعة.", "إذا استمر: فحص البوردة." });
+        }
         else
         {
             d.Explanation = "معالج SMC يدير الطاقة والحرارة والحساسات. لم تظهر في السجل مفاتيح تحدد القطعة، فالترتيب عام.";
@@ -226,7 +325,7 @@ public static class PanicAnalyzer
             {
                 "جرّب بطارية سليمة أو مصدر طاقة DC.",
                 "جرّب فلاتة شحن سليمة.",
-                "اجمع عدة سجلات بانك وحلّلها معًا: تكرار نفس المفتاح يحدد القطعة.",
+                "اجمع عدة سجلات بانك وحلّلها معًا: تكرار نفس المفتاح أو موضع الفشل يحدد القطعة.",
                 "إذا استمر: فحص البوردة.",
             });
         }
@@ -236,39 +335,47 @@ public static class PanicAnalyzer
     static void SensorDiagnosis(Diagnosis d, PanicLog log, string ps)
     {
         d.Kind = "حساس مفقود";
+        d.Signature = "sensor:" + string.Join(",", d.MissingSensors.OrderBy(x => x, StringComparer.OrdinalIgnoreCase));
+        d.LearnPattern = d.MissingSensors.Count == 1 ? d.MissingSensors[0] : "";
         var family = AppleDevices.FamilyOf(log.Product, ps);
+        var product = d.Product;
         var names = new List<string>();
+        var firstParts = new List<string>();
+        PanicKnowledge.Choice topChoice = null;
+        PanicKnowledge.Sensor top = null;
         foreach (var code in d.MissingSensors)
         {
             var s = PanicKnowledge.FindSensor(code);
             if (s == null)
             {
-                d.Evidence.Add(new("حساس مفقود", code, "رمز غير موجود في قاعدة المعرفة — أضف خبرتك عنه من «خبرة المحل»"));
+                d.Evidence.Add(new("حساس مفقود", code, "رمز غير موجود في قاعدة المعرفة — أضف خبرتك عنه من «خبرة المحل»", code));
                 Add(d, Parts.LastPart, 55, $"الحساس {code} غير معروف في القاعدة: ابدأ بالفلاتة التي فُكّت أو استُبدلت آخر مرة");
                 Add(d, Parts.Board, 35, "خط الحساس على البوردة");
                 names.Add(code);
                 continue;
             }
-            d.Evidence.Add(new("حساس مفقود", s.Code, s.What + " — " + s.Note));
-            foreach (var c in s.Locate(family)) Add(d, c.Part, c.Score, $"{s.Code}: {c.Why}");
+            var (choices, specific) = s.LocateFor(product, family);
+            if (specific) d.ModelSpecific = true;
+            d.Evidence.Add(new("حساس مفقود", s.Code, s.What + " — " + s.Note + (specific ? " (معلومة خاصة بهذا الموديل)" : ""), "Missing sensor"));
+            foreach (var c in choices) Add(d, c.Part, c.Score, $"{s.Code}: {c.Why}");
+            if (choices.Length > 0) firstParts.Add(choices[0].Part);
+            if (top == null && choices.Length > 0) { top = s; topChoice = choices[0]; }
             names.Add($"{s.Code} — {s.What}");
         }
 
         // أكثر من حساس على قطع مختلفة: غالبًا خط مشترك أو تأكسد
-        var parts = d.MissingSensors.Select(c => PanicKnowledge.FindSensor(c)?.Locate(family).FirstOrDefault()?.Part).Where(p => p != null).Distinct().ToList();
-        if (parts.Count > 1)
+        var distinct = firstParts.Distinct().ToList();
+        if (distinct.Count > 1)
         {
             Add(d, Parts.Board, 55, "أكثر من حساس مفقود على قطع مختلفة: خط مشترك أو تأكسد على البوردة");
-            d.Evidence.Add(new("عدة حساسات", string.Join("، ", d.MissingSensors), "الحساسات على أكثر من قطعة — افحص الخط المشترك والتأكسد"));
+            d.Evidence.Add(new("عدة حساسات", string.Join("، ", d.MissingSensors), "الحساسات على أكثر من قطعة — افحص الخط المشترك والتأكسد", "Missing sensor"));
         }
 
-        var top = d.MissingSensors.Select(PanicKnowledge.FindSensor).FirstOrDefault(s => s != null);
-        var topChoice = top?.Locate(family).FirstOrDefault();
         d.Title = d.MissingSensors.Count == 1 ? $"حساس مفقود: {names[0]}" : "حساسات مفقودة: " + string.Join("، ", d.MissingSensors);
         d.Explanation = "النظام لا يجد " + (d.MissingSensors.Count == 1 ? "الحساس" : "الحساسات") + " " + string.Join("، ", names) +
             "، فتتوقف خدمة مراقبة الحرارة (thermalmonitord) عن التسجيل، فيُعيد مراقب النظام تشغيل الجهاز" +
             (d.WatchdogSeconds > 0 ? $" بعد {d.WatchdogSeconds} ثانية تقريبًا من كل إقلاع." : ".");
-        d.Confidence = topChoice == null ? "منخفضة" : topChoice.Score >= 85 && parts.Count <= 1 ? "عالية" : "متوسطة";
+        d.Confidence = topChoice == null ? "منخفضة" : topChoice.Score >= 85 && distinct.Count <= 1 ? "عالية" : "متوسطة";
         d.Summary = topChoice != null
             ? $"الحساس {top.Code} غير موجود ← السبب الأرجح: {topChoice.Part}."
             : $"الحساس {d.MissingSensors[0]} غير موجود ← ابدأ بآخر فلاتة فُكّت أو استُبدلت.";
@@ -285,6 +392,8 @@ public static class PanicAnalyzer
     static void ServiceDiagnosis(Diagnosis d, PanicKnowledge.Service s)
     {
         d.Kind = "مراقب النظام";
+        d.Signature = "service:" + s.Name;
+        d.LearnPattern = "checkins from " + s.Name;
         d.Title = $"توقف {s.What} ({s.Name})";
         d.Explanation = $"مراقب النظام أعاد تشغيل الجهاز لأن {s.What} ({s.Name}) لم تسجّل حضورها" +
             (d.WatchdogSeconds > 0 ? $" خلال {d.WatchdogSeconds} ثانية." : ".");
@@ -297,6 +406,8 @@ public static class PanicAnalyzer
     static void UnknownService(Diagnosis d)
     {
         d.Kind = "مراقب النظام";
+        d.Signature = "service:" + d.WatchdogService;
+        d.LearnPattern = "checkins from " + d.WatchdogService;
         d.Title = $"توقف خدمة {d.WatchdogService}";
         d.Explanation = $"الخدمة {d.WatchdogService} لم تسجّل حضورها فأُعيد تشغيل الجهاز. هذه الخدمة ليست في قاعدة المعرفة.";
         Add(d, Parts.Ios, 50, "أغلب خدمات النظام تتوقف بسبب خلل برمجي");
@@ -306,21 +417,24 @@ public static class PanicAnalyzer
         d.Summary = $"الخدمة {d.WatchdogService} لا تستجيب ← ابدأ بتحديث أو استعادة iOS.";
     }
 
-    static void SignatureDiagnosis(Diagnosis d, PanicKnowledge.Signature s)
+    static void SignatureDiagnosis(Diagnosis d, PanicKnowledge.Signature s, string ps)
     {
         d.Kind = s.Kind;
+        d.Signature = "kind:" + s.Kind;
+        d.LearnPattern = s.Match.Match(ps).Value.Trim();
         d.Title = s.Title;
         d.Explanation = s.Explain;
         foreach (var c in s.Choices) Add(d, c.Part, c.Score, c.Why);
         d.Steps.AddRange(s.Steps);
         d.Confidence = s.Confidence;
         d.Summary = $"{s.Title} ← ابدأ بـ {s.Choices[0].Part}.";
-        d.Evidence.Add(new("نوع الانهيار", s.Title, s.Explain));
+        d.Evidence.Add(new("نوع الانهيار", s.Title, s.Explain, s.Match.Match(ps).Value));
     }
 
     static void GenericWatchdogDiagnosis(Diagnosis d)
     {
         d.Kind = "مراقب النظام";
+        d.Signature = "watchdog";
         d.Title = "تعليق النظام (Watchdog)";
         d.Explanation = "مراقب النظام أعاد تشغيل الجهاز لأن النظام تعلّق، ولم يُذكر اسم خدمة محددة.";
         Add(d, Parts.Ios, 50, "تعليق برمجي");
@@ -333,6 +447,7 @@ public static class PanicAnalyzer
     static void Unknown(Diagnosis d, string ps)
     {
         d.Kind = "غير معروف";
+        d.Signature = ps.Trim() == "" ? "" : "unknown";
         d.Title = ps.Trim() == "" ? "لا يوجد نص بانك للتحليل" : "نوع بانك غير موجود في قاعدة المعرفة";
         d.Explanation = ps.Trim() == ""
             ? "السجل لا يحتوي نص البانك (panicString). انسخ الملف كاملًا من: الإعدادات ← الخصوصية والأمان ← التحليلات والتحسينات ← بيانات التحليلات ← panic-full."
@@ -382,33 +497,34 @@ public static class PanicAnalyzer
         d.Evidence.Add(new("معلومات الحالة", f.ToString(), "من الفني — غيّرت ترتيب الأسباب"));
     }
 
+    /// <summary>
+    /// خبرة المحل: كل قاعدة مطابقة تضيف سببها بدرجتها (مع الأولوية). عند تعارض قاعدتين على قطعتين مختلفتين
+    /// تغلب الأعلى أولوية ثم الأعلى درجة؛ ويُذكر التعارض في الأدلة.
+    /// </summary>
     static void ApplyCustom(Diagnosis d, IEnumerable<CustomRule> custom)
     {
         if (custom == null) return;
         var ps = d.Log?.PanicString ?? "";
-        foreach (var r in custom)
+        var hits = custom.Where(r => r.Matches(ps, d.MissingSensors, d.Device, d.Product))
+                         .OrderByDescending(r => r.Priority).ThenByDescending(r => r.Score).ToList();
+        foreach (var r in hits)
         {
-            if (string.IsNullOrWhiteSpace(r.Pattern) || string.IsNullOrWhiteSpace(r.Part)) continue;
-            var pat = r.Pattern.Trim();
-            bool hit = ps.Contains(pat, StringComparison.OrdinalIgnoreCase) || d.MissingSensors.Contains(pat, StringComparer.OrdinalIgnoreCase);
-            if (!hit) continue;
-            if (!string.IsNullOrWhiteSpace(r.Device))
-            {
-                var dev = r.Device.Trim();
-                if (!(d.Device.Contains(dev, StringComparison.OrdinalIgnoreCase) || d.Product.Contains(dev, StringComparison.OrdinalIgnoreCase))) continue;
-            }
             var why = "خبرة المحل" + (r.Name != "" ? $" ({r.Name})" : "") + (r.Note != "" ? ": " + r.Note : "");
             Add(d, r.Part.Trim(), r.Score, why);
-            d.Evidence.Add(new("خبرة المحل", pat, $"{r.Part} — {r.Level}" + (r.Note != "" ? " — " + r.Note : "")));
-            if (r.Level == "مؤكد" && d.Confidence != "عالية") d.Confidence = "عالية";
+            d.Evidence.Add(new("خبرة المحل", r.Pattern.Trim(), $"{r.Part} — {r.Level}" + (r.Priority != 0 ? $" — أولوية {r.Priority}" : "") + (r.Note != "" ? " — " + r.Note : ""),
+                r.IsRegex ? null : r.Pattern.Trim()));
         }
+        var parts = hits.Select(r => r.Part.Trim()).Distinct().ToList();
+        if (parts.Count > 1)
+            d.Evidence.Add(new("تعارض قواعد", string.Join(" / ", parts), $"أكثر من قاعدة في خبرة المحل تنطبق — غلبت «{hits[0].Name}» (الأولوية ثم الدرجة)"));
+        if (hits.Count > 0 && hits[0].Level == "مؤكد" && d.Confidence != "عالية") d.Confidence = "عالية";
     }
 
     /// <summary>اسم الدرجة: «الأرجح» للأول فقط إذا تقدّم بوضوح (10 درجات على الأقل) وكانت درجته 70 فأكثر</summary>
     public static string LabelOf(int score, bool leadsClearly) =>
         leadsClearly && score >= 70 ? "الأرجح" : score >= 60 ? "مرجّح" : score >= 35 ? "محتمل" : "احتمال بعيد";
 
-    /// <summary>ترتيب الأسباب وتسميتها: «الأرجح» للأول فقط إذا تقدّم بوضوح، ثم مرجّح/محتمل/احتمال بعيد</summary>
+    /// <summary>ترتيب الأسباب وتسميتها</summary>
     static void Rank(Diagnosis d)
     {
         d.Candidates = d.Candidates.OrderByDescending(c => c.Score).ThenBy(c => c.Part, StringComparer.Ordinal).ToList();
@@ -417,57 +533,143 @@ public static class PanicAnalyzer
         if (d.Candidates.Count > 0 && d.Candidates[0].Label != "الأرجح" && d.Confidence == "عالية") d.Confidence = "متوسطة";
     }
 
+    // ============================================================== هوية الجهاز
+    /// <summary>
+    /// نفس الجهاز؟ مفتاح التقارير (crashReporterKey) متطابق، أو يختلف بحرفين على الأكثر (خطأ نسخ من صورة) مع نفس الموديل.
+    /// إن غاب المفتاح في أحدهما: يُقارن الموديل فقط.
+    /// </summary>
+    public static bool SameDevice(PanicLog a, PanicLog b)
+    {
+        if (a == null || b == null) return false;
+        string ka = a.CrashReporterKey.ToLowerInvariant(), kb = b.CrashReporterKey.ToLowerInvariant();
+        if (ka != "" && kb != "")
+        {
+            if (ka == kb) return true;
+            bool sameModel = a.Product == "" || b.Product == "" || a.Product.Equals(b.Product, StringComparison.OrdinalIgnoreCase);
+            return sameModel && ka.Length == kb.Length && ka.Length >= 20 && ka.Zip(kb).Count(p => p.First != p.Second) <= 2;
+        }
+        return a.DeviceKey != "" && a.DeviceKey.Equals(b.DeviceKey, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>تجميع السجلات حسب الجهاز (بالمطابقة التقريبية): يعيد رقم مجموعة لكل سجل</summary>
+    public static int[] GroupDevices(IList<PanicLog> logs)
+    {
+        var group = new int[logs.Count];
+        for (int i = 0; i < logs.Count; i++) group[i] = -1;
+        int next = 0;
+        for (int i = 0; i < logs.Count; i++)
+        {
+            if (group[i] >= 0) continue;
+            group[i] = next;
+            for (int j = i + 1; j < logs.Count; j++)
+                if (group[j] < 0 && SameDevice(logs[i], logs[j])) group[j] = next;
+            next++;
+        }
+        return group;
+    }
+
     // ============================================================== عدة سجلات
     /// <summary>
-    /// تحليل مجمّع لسجلات جهاز واحد: تكرار نفس الحساس أو نفس النوع يرفع الثقة، واختلاف الأنواع يخفضها
-    /// ويرجّح سببًا عامًا (بوردة أو طاقة أو نظام). السجلات من أجهزة مختلفة لا تُجمع (تحذير).
+    /// تحليل مجمّع لسجلات جهاز واحد، مرتبة زمنيًا:
+    /// تكرار نفس النمط يرفع الثقة، واختلاف الأنواع يخفضها ويرجّح سببًا عامًا. السجلات الأحدث وزنها أكبر
+    /// (تعبّر عن حالة الجهاز الآن، خصوصًا بعد تبديل قطعة). المدة بين البانكات تُحسب من أوقاتها.
     /// </summary>
-    public static Diagnosis Combine(IList<Diagnosis> items)
+    public static Diagnosis Combine(IList<Diagnosis> input)
     {
-        if (items == null || items.Count == 0) return null;
-        if (items.Count == 1) return items[0];
+        if (input == null || input.Count == 0) return null;
+        if (input.Count == 1) return input[0];
+        // ترتيب زمني ثابت: السجلات بلا وقت في النهاية بترتيبها الأصلي
+        var items = input.Select((x, i) => (x, i)).OrderBy(p => p.x.Log?.Time == null ? 1 : 0).ThenBy(p => p.x.Log?.Time).ThenBy(p => p.i).Select(p => p.x).ToList();
         var first = items[0];
+        var last = items[^1];
         var d = new Diagnosis
         {
-            Log = first.Log, Device = first.Device, Product = first.Product, Soc = first.Soc, Ios = first.Ios, Build = first.Build,
-            Time = string.Join(" ← ", new[] { items.Select(x => x.Time).Where(t => t != "").DefaultIfEmpty("").Min(), items.Select(x => x.Time).Where(t => t != "").DefaultIfEmpty("").Max() }.Where(t => t != "").Distinct()),
-            BugInfo = first.BugInfo, LogCount = items.Count,
+            Log = last.Log, Device = last.Device, Product = last.Product, Soc = last.Soc, Ios = last.Ios, Build = last.Build,
+            Time = string.Join(" ← ", new[] { first.Time, last.Time }.Where(t => t != "").Distinct()),
+            BugInfo = last.BugInfo, LogCount = items.Count,
         };
 
-        var devices = items.Select(x => x.Log?.DeviceKey ?? "").Where(k => k != "").Distinct().ToList();
-        if (devices.Count > 1)
-            d.Warnings.Add($"السجلات من {devices.Count} أجهزة مختلفة (مفتاح التقارير أو الموديل مختلف) — حلّل سجلات كل جهاز وحدها.");
+        var groups = GroupDevices(items.Select(x => x.Log).ToList());
+        if (groups.Distinct().Count() > 1)
+            d.Warnings.Add($"السجلات من {groups.Distinct().Count()} أجهزة مختلفة (مفتاح التقارير أو الموديل مختلف) — حلّل سجلات كل جهاز وحدها.");
 
-        // الأسباب: متوسط الدرجة عبر السجلات (السبب الذي لا يظهر في سجل يُحسب صفرًا فيه)
-        foreach (var g in items.SelectMany(x => x.Candidates).GroupBy(c => c.Part))
+        // الوزن: 1 للأقدم حتى 2 للأحدث
+        var weights = items.Select((x, i) => 1.0 + (double)i / (items.Count - 1)).ToList();
+        double total = weights.Sum();
+        foreach (var g in items.SelectMany((x, i) => x.Candidates.Select(c => (c, w: weights[i]))).GroupBy(p => p.c.Part))
         {
             int n = g.Count();
-            int avg = (int)Math.Round(g.Sum(c => (double)c.Score) / items.Count);
-            var why = g.OrderByDescending(c => c.Score).First().Why;
+            int avg = (int)Math.Round(g.Sum(p => p.c.Score * p.w) / total);
+            var why = g.OrderByDescending(p => p.c.Score).First().c.Why;
             d.Candidates.Add(new Candidate { Part = g.Key, Score = Math.Clamp(avg, 1, 99), Why = n == items.Count ? why : $"{why} (ظهر في {n} من {items.Count} سجلات)" });
         }
 
-        var kinds = items.Select(x => x.Kind).Distinct().ToList();
-        var sensorSets = items.Select(x => string.Join(",", x.MissingSensors.Select(s => s.ToLowerInvariant()).OrderBy(s => s))).Distinct().ToList();
         d.MissingSensors = items.SelectMany(x => x.MissingSensors).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         d.SmcKeys = items.SelectMany(x => x.SmcKeys).Distinct().ToList();
         d.WatchdogService = string.Join("، ", items.Select(x => x.WatchdogService).Where(s => s != "").Distinct());
         d.WatchdogSeconds = items.Select(x => x.WatchdogSeconds).FirstOrDefault(s => s > 0);
-
+        d.Timeline = items.Select(x => new TimelineItem(x.Log?.Time, x.Time, x.Kind, x.Title, x.TopPart, x.Signature, x.Log?.Source ?? "")).ToList();
         foreach (var x in items)
             d.Evidence.Add(new("سجل " + (x.Time != "" ? x.Time : x.Log?.Source ?? ""), x.Title, $"{x.Kind} — الأرجح: {(x.TopPart == "" ? "—" : x.TopPart)}"));
 
         var rank = new Dictionary<string, int> { ["منخفضة"] = 0, ["متوسطة"] = 1, ["عالية"] = 2 };
         int conf = items.Min(x => rank.TryGetValue(x.Confidence, out var r) ? r : 0);
 
-        if (kinds.Count == 1)
+        // ---------- المدة بين البانكات ----------
+        var times = items.Select(x => x.Log?.Time).Where(t => t != null).Select(t => t.Value).ToList();
+        bool regular3 = false;
+        if (times.Count >= 3)
         {
-            d.Kind = first.Kind;
+            var gaps = times.Zip(times.Skip(1), (a, b) => (b - a).TotalMinutes).Where(m => m > 0).ToList();
+            if (gaps.Count >= 2)
+            {
+                var sorted = gaps.OrderBy(x => x).ToList();
+                double median = sorted[sorted.Count / 2];
+                regular3 = gaps.All(g => g is >= 2 and <= 6);
+                bool irregular = sorted[^1] / Math.Max(0.1, sorted[0]) > 5;
+                d.Evidence.Add(new("المدة بين البانكات", $"الوسيط {Minutes(median)} (من {Minutes(sorted[0])} إلى {Minutes(sorted[^1])})",
+                    regular3 ? "منتظمة كل 3 دقائق تقريبًا — نمط الحساس المفقود أو الخدمة المتوقفة"
+                    : irregular ? "غير منتظمة — يرجّح طاقة غير مستقرة أو بوردة أو نظام، أكثر من قطعة واحدة"
+                    : "متقاربة"));
+            }
+        }
+
+        // ---------- تغيّر النمط مع الوقت ----------
+        var sigs = items.Select(x => x.Signature).ToList();
+        int change = Enumerable.Range(1, items.Count - 1).FirstOrDefault(i => sigs[i] != sigs[i - 1]);
+        // تغيّر حقيقي: نفس الجهاز، ونمطان ثابتان كل منهما في سجلين على الأقل (سجل واحد مختلف لا يكفي للحكم)
+        bool changedOnce = change >= 2 && items.Count - change >= 2 && groups.Distinct().Count() == 1
+                           && sigs.Skip(change).Distinct().Count() == 1 && sigs.Take(change).Distinct().Count() == 1;
+
+        var kinds = items.Select(x => x.Kind).Distinct().ToList();
+        var sensorSets = items.Select(x => string.Join(",", x.MissingSensors.Select(s => s.ToLowerInvariant()).OrderBy(s => s))).Distinct().ToList();
+        if (changedOnce)
+        {
+            // نمط قديم ثم نمط جديد ثابت: غالبًا بعد تبديل قطعة أو تغيّر حالة الجهاز — الحالي هو المهم
+            d.Kind = last.Kind;
+            d.Signature = last.Signature;
+            d.LearnPattern = last.LearnPattern;
+            d.Title = first.Kind == last.Kind ? $"تغيّر النمط: {first.Title} ← {last.Title}" : $"تغيّر نوع البانك: {first.Kind} ← {last.Kind}";
+            d.Explanation = $"أول {change} سجلات: {first.Title}. ومن {items[change].Time} صار: {last.Title}.\n" +
+                "إذا بُدّلت قطعة بين الوقتين فالنمط القديم حُلّ وظهر عطل آخر (أو كانت القطعة الجديدة هي السبب). التشخيص الحالي مبني على السجلات الأحدث فقط.";
+            d.Steps.AddRange(last.Steps);
+            d.Evidence.Add(new("تغيّر النمط", $"بعد {items[change].Time}", $"قبل: {first.Title} — بعد: {last.Title}"));
+            // الترتيب من السجلات الأحدث وحدها: النمط القديم لم يعد يصف الجهاز
+            d.Candidates = PanicAnalyzer.Combine(items.Skip(change).ToList()).Candidates.Select(c => c.Clone()).ToList();
+            conf = rank.TryGetValue(last.Confidence, out var lc) ? lc : 0;
+        }
+        else if (kinds.Count == 1)
+        {
+            d.Kind = last.Kind;
+            d.Signature = sigs.Distinct().Count() == 1 ? last.Signature : "";
+            d.LearnPattern = sigs.Distinct().Count() == 1 ? last.LearnPattern : "";
             bool sameSensors = sensorSets.Count == 1 && sensorSets[0] != "";
-            d.Title = first.Title + $" — تكرر في {items.Count} سجلات";
-            d.Explanation = first.Explanation + (sameSensors ? $"\nنفس الحساس ({string.Join("، ", first.MissingSensors)}) ظهر في كل السجلات: هذا يؤكد مسار القطعة." : "");
-            if ((sameSensors || first.Kind == "SMC" && items.All(x => x.SmcKeys.Any(PanicKnowledge.IsBatteryKey))) && conf < 2) conf++;
-            d.Steps.AddRange(first.Steps);
+            d.Title = last.Title + $" — تكرر في {items.Count} سجلات";
+            d.Explanation = last.Explanation + (sameSensors ? $"\nنفس الحساس ({string.Join("، ", last.MissingSensors)}) ظهر في كل السجلات: هذا يؤكد مسار القطعة." : "");
+            bool sameSmc = last.Kind == "SMC" && sigs.Distinct().Count() == 1 && items.All(x => x.SmcKeys.Any(PanicKnowledge.IsBatteryKey));
+            if ((sameSensors || sameSmc) && conf < 2) conf++;
+            if (regular3 && last.Kind is "حساس مفقود" or "مراقب النظام" && conf < 2) conf++;
+            d.Steps.AddRange(last.Steps);
             if (!sameSensors && d.MissingSensors.Count > 1)
             {
                 Add(d, Parts.Board, 60, "الحساسات المفقودة تتغير بين السجلات: خط مشترك أو تأكسد أو مشكلة طاقة");
@@ -497,8 +699,10 @@ public static class PanicAnalyzer
         return d;
     }
 
-    // ============================================================== تقرير نصي
-    /// <summary>تقرير نصي كامل (للنسخ أو الإرسال للزبون أو الحفظ)</summary>
+    static string Minutes(double m) => m < 1 ? $"{Math.Round(m * 60)} ثانية" : m < 90 ? $"{Math.Round(m, 1)} دقيقة" : $"{Math.Round(m / 60, 1)} ساعة";
+
+    // ============================================================== التقارير النصية
+    /// <summary>تقرير الفني: كل التفاصيل والأدلة (للنسخ أو الحفظ)</summary>
     public static string Report(Diagnosis d)
     {
         var sb = new StringBuilder();
@@ -510,6 +714,7 @@ public static class PanicAnalyzer
         Line("iOS", d.Ios + (d.Build != "" ? $" ({d.Build})" : ""));
         Line("وقت البانك", d.Time);
         if (d.LogCount > 1) Line("عدد السجلات", d.LogCount.ToString(CultureInfo.InvariantCulture));
+        Line("بصمة النمط", d.Signature);
         sb.AppendLine();
         Line("التشخيص", d.Title);
         Line("الخلاصة", d.Summary);
@@ -523,6 +728,12 @@ public static class PanicAnalyzer
             sb.AppendLine("خطوات الفحص:");
             for (int i = 0; i < d.Steps.Count; i++) sb.AppendLine($"  {i + 1}. {d.Steps[i]}");
         }
+        if (d.Timeline.Count > 1)
+        {
+            sb.AppendLine();
+            sb.AppendLine("الخط الزمني:");
+            foreach (var t in d.Timeline) sb.AppendLine($"  • {(t.TimeText == "" ? t.Source : t.TimeText)}: {t.Kind} — {t.TopPart}");
+        }
         if (d.Evidence.Count > 0)
         {
             sb.AppendLine();
@@ -534,6 +745,33 @@ public static class PanicAnalyzer
             sb.AppendLine();
             foreach (var w in d.Warnings) sb.AppendLine("تنبيه: " + w);
         }
+        return sb.ToString();
+    }
+
+    /// <summary>عبارة بسيطة للزبون حسب نوع العطل (بلا رموز تقنية)</summary>
+    public static string CustomerProblem(Diagnosis d) => d.Kind switch
+    {
+        "حساس مفقود" => "الجهاز يعيد التشغيل تلقائيًا كل بضع دقائق لأن أحد الحساسات الداخلية لا يعمل.",
+        "SMC" => "الشريحة المسؤولة عن الطاقة والحرارة في الجهاز توقفت عن الاستجابة، فيعيد الجهاز التشغيل.",
+        "مراقب النظام" => "إحدى خدمات النظام الأساسية توقفت عن العمل، فيعيد الجهاز التشغيل لحماية نفسه.",
+        "النواة (برمجي)" => "خطأ في نظام التشغيل نفسه، وغالبًا يُحل بتحديث النظام أو إعادة تثبيته.",
+        "أنواع مختلفة" => "الجهاز يتوقف لأسباب متغيرة، وهذا يدل غالبًا على مشكلة عامة في الطاقة أو اللوحة الأم أو النظام.",
+        "غير معروف" => "الجهاز أعاد التشغيل بشكل مفاجئ، ويحتاج فحصًا عمليًا لتحديد السبب.",
+        _ => "الجهاز أعاد التشغيل بسبب توقف في: " + d.Title + ".",
+    };
+
+    /// <summary>تقرير الزبون: لغة بسيطة، القطعة المرجّحة، ودرجة الثقة — بلا رموز ولا أدلة تقنية</summary>
+    public static string CustomerReport(Diagnosis d, string shopName = "")
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("تقرير فحص الجهاز" + (string.IsNullOrWhiteSpace(shopName) ? "" : " — " + shopName));
+        sb.AppendLine();
+        if (d.Device != "") sb.AppendLine("الجهاز: " + d.Device);
+        sb.AppendLine("المشكلة: " + CustomerProblem(d));
+        if (d.TopPart != "") sb.AppendLine("السبب المرجّح: " + d.TopPart + (d.Candidates.Count > 1 ? " (وقد يكون: " + d.Candidates[1].Part + ")" : ""));
+        sb.AppendLine("درجة الثقة: " + d.Confidence + (d.LogCount > 1 ? $" (من {d.LogCount} سجلات)" : ""));
+        sb.AppendLine();
+        sb.AppendLine("ملاحظة: التشخيص مبني على سجل الأعطال الذي يحفظه الجهاز، ويُؤكَّد بالفحص العملي قبل تبديل أي قطعة.");
         return sb.ToString();
     }
 }

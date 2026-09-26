@@ -4,7 +4,7 @@ using Kashif;
 namespace Kashif.Tests;
 
 /// <summary>اختبارات محرك التحليل على سجلات حقيقية (منسوخة من صور) وسجلات ‎.ips‎ سليمة</summary>
-static class Program
+static partial class Program
 {
     static int failed, passed;
 
@@ -34,6 +34,7 @@ static class Program
         Run("سطر الحساسات بلا فواصل أسطر", SensorsNoNewline);
         Run("كلمات تشبه التواقيع", NoFalseSignatures);
         Run("نصوص فارغة وغريبة", Garbage);
+        RunMore();
         Console.WriteLine($"\nنجح {passed}، فشل {failed}");
         return failed == 0 ? 0 : 1;
     }

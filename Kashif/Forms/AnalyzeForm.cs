@@ -3,45 +3,55 @@ using System.Data;
 namespace Kashif;
 
 /// <summary>
-/// تحليل البانك — الشاشة الرئيسية للبرنامج (F2):
-/// افتح ملفات panic-full أو الصق النص (حتى المنسوخ من صورة)، فيظهر التشخيص والأسباب مرتبة وخطوات الفحص
-/// والأدلة من السجل نفسه. عدة سجلات لنفس الجهاز تُحلَّل معًا (التكرار يرفع الثقة، والاختلاف يكشف السبب العام).
+/// تحليل البانك — الشاشة الرئيسية للبرنامج (F2).
+/// التخطيط: شريط أدوات، رأس خلاصة بعرض الشاشة (مع أعلى 3 أسباب)، شريط «ما حدث للجهاز»،
+/// ثم مساحة العمل: قائمة السجلات (تُطوى) وتبويبات واسعة للأسباب والخطوات والأدلة مع نص السجل والخط الزمني والزبون والتقرير.
 /// </summary>
 public class AnalyzeForm : BaseForm
 {
     public const string PageTitle = "تحليل البانك";
     const long MaxFileBytes = 20 * 1024 * 1024;
 
-    readonly DataGridView logsGrid = Ui.NewGrid(), causes = Ui.NewGrid(), steps = Ui.NewGrid(), evidence = Ui.NewGrid(), previous = Ui.NewGrid();
-    readonly TextBox raw = new()
+    // ---------- الإدخال ----------
+    readonly DataGridView logsGrid = Ui.NewGrid(), evidence = Ui.NewGrid(), timeline = Ui.NewGrid(), previous = Ui.NewGrid();
+    readonly RichTextBox raw = new()
     {
-        Multiline = true, ScrollBars = ScrollBars.Both, WordWrap = false, AcceptsReturn = true, Dock = DockStyle.Fill,
-        BorderStyle = BorderStyle.None, RightToLeft = RightToLeft.No, BackColor = Theme.SurfaceAlt, ForeColor = Theme.Ink, MaxLength = 0,
+        Dock = DockStyle.Fill, BorderStyle = BorderStyle.None, WordWrap = false, DetectUrls = false, HideSelection = false,
+        RightToLeft = RightToLeft.No, BackColor = Theme.SurfaceAlt, ForeColor = Theme.Ink, ScrollBars = RichTextBoxScrollBars.Both,
     };
-    readonly TextBox report = new()
-    {
-        Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill, BorderStyle = BorderStyle.None,
-        BackColor = Theme.Surface, ForeColor = Theme.Ink,
-    };
-    readonly TextBox customer = new() { Width = 300, PlaceholderText = "اسم الزبون" };
-    readonly TextBox phone = new() { Width = 200, PlaceholderText = "07xx xxx xxxx" };
-    readonly TextBox notes = new() { Width = 520, Height = 70, Multiline = true, ScrollBars = ScrollBars.Vertical, PlaceholderText = "ما وجدته عند الفحص، القطعة التي بُدّلت، النتيجة..." };
-    readonly ComboBox status = Ui.Combo(200);
     readonly Toggle tLiquid = new() { Text = "تعرض لسوائل", Width = 150 }, tBattery = new() { Text = "بطارية مستبدلة", Width = 160 },
         tFlex = new() { Text = "فلاتة شحن مستبدلة", Width = 180 }, tScreen = new() { Text = "شاشة مستبدلة", Width = 150 }, tDrop = new() { Text = "سقوط أو ضربة", Width = 150 };
     readonly Toggle tCombine = new() { Text = "تجميع سجلات الجهاز", Width = 190 };
-    readonly VerdictPanel verdict = new() { Dock = DockStyle.Top, Height = 196 };
-    readonly CardPanel logsCard, rawCard;
+
+    // ---------- الزبون والنتيجة ----------
+    readonly TextBox customer = new() { Width = 320, PlaceholderText = "اسم الزبون" };
+    readonly TextBox phone = new() { Width = 220, PlaceholderText = "07xx xxx xxxx" };
+    readonly ComboBox status = Ui.Combo(220);
+    readonly ComboBox fixedPart = new() { Width = 420, DropDownStyle = ComboBoxStyle.DropDown, Font = Theme.F(10) };
+    readonly TextBox notes = new() { Width = 780, Height = 90, Multiline = true, ScrollBars = ScrollBars.Vertical, PlaceholderText = "ما وجدته عند الفحص، ما جرّبته، النتيجة..." };
+
+    // ---------- العرض ----------
+    readonly VerdictHero verdict = new() { Dock = DockStyle.Top, Height = 214 };
+    readonly CardStack causes = new() { Dock = DockStyle.Fill, Padding = new Padding(4), EmptyText = "لا توجد أسباب — افتح سجل بانك" };
+    readonly CardStack steps = new() { Dock = DockStyle.Fill, Padding = new Padding(4), EmptyText = "لا توجد خطوات" };
+    readonly TextBox report = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill, BorderStyle = BorderStyle.None, BackColor = Theme.Surface, ForeColor = Theme.Ink };
+    readonly Toggle tCustomerReport = new() { Text = "تقرير الزبون (مبسّط)", Width = 220 };
+    readonly Label lblPrev = new() { Dock = DockStyle.Top, Height = 34, ForeColor = Theme.Muted, Font = Theme.F(10), TextAlign = ContentAlignment.MiddleLeft, BackColor = Theme.Surface };
+    readonly Label lblTimeline = new() { Dock = DockStyle.Top, Height = 34, ForeColor = Theme.Muted, Font = Theme.F(10), TextAlign = ContentAlignment.MiddleLeft, BackColor = Theme.Surface };
+    readonly Label lblSteps = new() { Dock = DockStyle.Top, Height = 30, ForeColor = Theme.Muted, Font = Theme.F(9.5f), TextAlign = ContentAlignment.MiddleLeft, BackColor = Theme.Surface, Text = "انقر على الخطوة عند إنجازها" };
+    readonly CardPanel logsCard;
     readonly ModernTabs tabs = new() { Dock = DockStyle.Fill };
-    readonly ModernButton bSave, bCopy, bPrint, bRemove;
-    readonly Label lblPrev = new() { Dock = DockStyle.Top, Height = 30, ForeColor = Theme.Muted, Font = Theme.F(9.5f), TextAlign = ContentAlignment.MiddleLeft, BackColor = Theme.Surface };
+    readonly ModernButton bSave, bCopy, bPrintTech, bPrintCustomer, bRemove, bLogs, bOpen, bPaste, bAnalyze, bClear;
+    ModernButton bCompare;
 
     readonly List<PanicLog> logs = new();
     readonly List<Diagnosis> diags = new();
+    readonly HashSet<string> doneSteps = new();
+    List<Evidence> shownEvidence = new();
     Diagnosis shown;
     List<PanicLog> shownLogs = new();
     long recordId;
-    bool dirty, loading;
+    bool dirty, loading, busy;
 
     // ---------- فتح الشاشة من أماكن أخرى ----------
     public static void OpenRecord(long id)
@@ -79,80 +89,77 @@ public class AnalyzeForm : BaseForm
         tCombine.Checked = Settings.On("analyze_combine");
         status.Items.AddRange(PanicStore.Statuses);
         status.SelectedIndex = 0;
-        try { raw.Font = new Font("Consolas", 9.5f); } catch { raw.Font = Theme.F(9); }
-        report.Font = Theme.F(10);
+        fixedPart.Items.AddRange(Parts.All.OrderBy(p => p).Cast<object>().ToArray());
+        fixedPart.AutoCompleteMode = AutoCompleteMode.SuggestAppend;
+        fixedPart.AutoCompleteSource = AutoCompleteSource.ListItems;
+        try { raw.Font = new Font("Consolas", 10f); } catch { raw.Font = Theme.F(9.5f); }
+        report.Font = Theme.F(10.5f);
 
         // ---------- شريط الأدوات ----------
         var bar = Theme.Bar();
-        var bOpen = Theme.Btn("فتح ملفات", Theme.Brand, 130, "folder-open");
-        var bPaste = Theme.Btn("لصق", Theme.Brand, 90, "clipboard-list");
-        var bAnalyze = Theme.Btn("تحليل النص", Theme.Success, 130, "scan-line");
-        var bClear = Theme.Btn("مسح الكل", Theme.Gray, 110, "x");
+        bOpen = Theme.Btn("فتح ملفات", Theme.Brand, 130, "folder-open");
+        bPaste = Theme.Btn("لصق", Theme.Brand, 90, "clipboard-list");
+        bAnalyze = Theme.Btn("تحليل النص", Theme.Success, 130, "scan-line");
+        bClear = Theme.Btn("فحص جديد", Theme.Gray, 120, "plus");
         bSave = Theme.Btn("حفظ في السجل", Theme.Success, 140, "save");
+        bPrintTech = Theme.Btn("طباعة للفني", Theme.Gray, 125, "printer");
+        bPrintCustomer = Theme.Btn("طباعة للزبون", Theme.Gray, 130, "printer");
         bCopy = Theme.Btn("نسخ التقرير", Theme.Gray, 125, "copy");
-        bPrint = Theme.Btn("طباعة", Theme.Gray, 100, "printer");
+        bLogs = Theme.Btn("السجلات", Theme.Gray, 110, "panel-right");
         tCombine.Margin = new Padding(12, 8, 6, 2);
-        bar.Controls.AddRange(new Control[] { bOpen, bPaste, bAnalyze, bClear, tCombine, bSave, bCopy, bPrint });
+        bar.Controls.AddRange(new Control[] { bOpen, bPaste, bAnalyze, bClear, tCombine, bSave, bPrintTech, bPrintCustomer, bCopy, bLogs });
         foreach (var b in bar.Controls.OfType<ModernButton>()) { b.Height = 40; b.Margin = new Padding(4, 3, 4, 3); }
 
-        // ---------- الجهة الأولى: السجلات ونصها وما حدث للجهاز ----------
-        logsCard = new CardPanel { Dock = DockStyle.Top, Height = 250, Title = "السجلات", IconName = "file-text", Subtitle = "افتح ملفات panic-full أو الصق النص — أو اسحب الملفات إلى هنا" };
-        bRemove = new ModernButton { Text = "إزالة المحدد", IconName = "trash-2", Kind = BtnKind.Secondary, Height = 34, Dock = DockStyle.Bottom };
+        // ---------- ما حدث للجهاز (سطر واحد بعرض الشاشة) ----------
+        var flags = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 48, BackColor = Theme.Bg, WrapContents = false, Padding = new Padding(4, 6, 4, 0) };
+        flags.Controls.Add(new Label { Text = "ما حدث للجهاز:", AutoSize = false, Width = 130, Height = 34, Font = Theme.FS(10), ForeColor = Theme.Text2, TextAlign = ContentAlignment.MiddleLeft });
+        foreach (var t in new[] { tLiquid, tBattery, tFlex, tScreen, tDrop }) { t.Margin = new Padding(6, 0, 14, 0); flags.Controls.Add(t); }
+
+        // ---------- قائمة السجلات (جانبية، تُطوى) ----------
+        logsCard = new CardPanel { Dock = DockStyle.Right, Width = 340, Title = "السجلات", IconName = "file-text", Subtitle = "اسحب الملفات إلى هنا" };
+        bRemove = new ModernButton { Text = "إزالة المحدد", IconName = "trash-2", Kind = BtnKind.Secondary, Height = 36, Dock = DockStyle.Bottom };
         logsCard.Controls.Add(logsGrid);
-        logsCard.Controls.Add(new Panel { Dock = DockStyle.Bottom, Height = 6, BackColor = Theme.Surface });
+        logsCard.Controls.Add(new Panel { Dock = DockStyle.Bottom, Height = 8, BackColor = Theme.Surface });
         logsCard.Controls.Add(bRemove);
-
-        rawCard = new CardPanel { Dock = DockStyle.Fill, Title = "نص السجل", IconName = "scroll-text", Subtitle = "يمكنك تعديل النص ثم «تحليل النص»" };
-        var rawHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.SurfaceAlt, Padding = new Padding(6) };
-        rawHost.Controls.Add(raw);
-        rawCard.Controls.Add(rawHost);
-
-        var flagsCard = new CardPanel { Dock = DockStyle.Bottom, Height = 150, Title = "ما حدث للجهاز", IconName = "wrench", Subtitle = "يغيّر ترتيب الأسباب" };
-        var flagsFlow = new FlowLayoutPanel { Dock = DockStyle.Fill, BackColor = Theme.Surface, WrapContents = true };
-        foreach (var t in new[] { tLiquid, tBattery, tFlex, tScreen, tDrop }) { t.Margin = new Padding(4, 2, 10, 2); flagsFlow.Controls.Add(t); }
-        flagsCard.Controls.Add(flagsFlow);
-
-        var input = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Margin = new Padding(14, 0, 0, 0) };
-        input.Controls.Add(rawCard);
-        input.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 12, BackColor = Theme.Bg });
-        input.Controls.Add(logsCard);
-        input.Controls.Add(new Panel { Dock = DockStyle.Bottom, Height = 12, BackColor = Theme.Bg });
-        input.Controls.Add(flagsCard);
-
-        // ---------- الجهة الثانية: النتيجة ----------
-        FitColumns(logsGrid, ("#", 8), ("المصدر", 30), ("الجهاز", 26), ("النوع", 20), ("الأرجح", 30));
-        FitColumns(causes, ("#", 6), ("السبب / القطعة", 34), ("الحالة", 14), ("لماذا", 46));
-        FitColumns(steps, ("#", 6), ("الخطوة", 94));
-        FitColumns(evidence, ("الدليل", 20), ("القيمة", 34), ("المعنى", 46));
-        FitColumns(previous, ("التاريخ", 22), ("التشخيص", 36), ("الأرجح", 26), ("الحالة", 16));
-        foreach (var g in new[] { causes, steps, evidence })
+        logsGrid.ColumnHeadersVisible = false;
+        logsGrid.DefaultCellStyle.WrapMode = DataGridViewTriState.True;
+        logsGrid.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCells;
+        logsGrid.ScrollBars = ScrollBars.Vertical;
+        logsGrid.DataBindingComplete += (s, e) =>
         {
-            g.DefaultCellStyle.WrapMode = DataGridViewTriState.True;
-            g.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCells;
-        }
+            if (logsGrid.Columns.Contains("#")) { logsGrid.Columns["#"].FillWeight = 14; logsGrid.Columns["#"].MinimumWidth = Dpi.S(34); logsGrid.Columns["#"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter; }
+            if (logsGrid.Columns.Contains("السجل")) { logsGrid.Columns["السجل"].FillWeight = 86; logsGrid.Columns["السجل"].MinimumWidth = Dpi.S(120); }
+        };
 
-        tabs.Add("الأسباب مرتبة", Wrap(causes), "list-ordered", "الأسباب");
-        tabs.Add("خطوات الفحص", Wrap(steps), "list-checks", "الخطوات");
-        tabs.Add("الأدلة من السجل", Wrap(evidence), "search", "الأدلة");
-        tabs.Add("التقرير", Wrap(report), "file-text");
-        tabs.Add("الزبون والحفظ", CustomerPage(), "user", "الزبون");
-        var prevPage = Wrap(previous);
-        prevPage.Controls.Add(lblPrev);
-        tabs.Add("فحوصات سابقة للجهاز", prevPage, "history", "السابقة");
+        // ---------- التبويبات ----------
+        FitColumns(evidence, ("الدليل", 18), ("القيمة", 36), ("المعنى", 46));
+        FitColumns(timeline, ("الوقت", 22), ("النوع", 14), ("التشخيص", 34), ("الأرجح", 22), ("المصدر", 8));
+        FitColumns(previous, ("التاريخ", 16), ("التشخيص", 30), ("الأرجح", 20), ("القطعة المُصلِحة", 20), ("الحالة", 14));
+        foreach (var g in new[] { evidence, timeline }) { g.DefaultCellStyle.WrapMode = DataGridViewTriState.True; g.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCells; }
 
-        var result = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
-        result.Controls.Add(tabs);
-        result.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 12, BackColor = Theme.Bg });
-        result.Controls.Add(verdict);
+        tabs.Add("الأسباب مرتبة", Pad(causes), "list-ordered", "الأسباب");
+        var stepsPage = Pad(steps);
+        stepsPage.Controls.Add(lblSteps);
+        tabs.Add("خطوات الفحص", stepsPage, "list-checks", "الخطوات");
+        tabs.Add("الأدلة ونص السجل", EvidencePage(), "search", "الأدلة");
+        var tlPage = Pad(timeline);
+        tlPage.Controls.Add(lblTimeline);
+        tabs.Add("الخط الزمني", tlPage, "history", "الزمن");
+        tabs.Add("الزبون والنتيجة", CustomerPage(), "user", "الزبون");
+        tabs.Add("فحوصات سابقة للجهاز", PreviousPage(), "repeat", "السابقة");
+        tabs.Add("التقرير", ReportPage(), "file-text");
 
-        var body = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = Theme.Bg };
-        body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 36));
-        body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 64));
-        body.Controls.Add(input, 0, 0);
-        body.Controls.Add(result, 1, 0);
+        var work = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
+        work.Controls.Add(tabs);
+        work.Controls.Add(new Panel { Dock = DockStyle.Right, Width = 14, BackColor = Theme.Bg });
+        work.Controls.Add(logsCard);
 
-        Controls.Add(body);
+        Controls.Add(work);
+        Controls.Add(new Panel { Dock = DockStyle.Top, Height = 6 });
+        Controls.Add(flags);
         Controls.Add(new Panel { Dock = DockStyle.Top, Height = 8 });
+        Controls.Add(verdict);
+        Controls.Add(new Panel { Dock = DockStyle.Top, Height = 10 });
         Controls.Add(bar);
 
         // ---------- الأحداث ----------
@@ -162,13 +169,17 @@ public class AnalyzeForm : BaseForm
         bClear.Click += (s, e) => ClearAll(ask: true);
         bSave.Click += (s, e) => SaveRecord(silent: false);
         bCopy.Click += (s, e) => CopyReport();
-        bPrint.Click += (s, e) => PrintReport();
+        bPrintTech.Click += (s, e) => PrintReport(forCustomer: false);
+        bPrintCustomer.Click += (s, e) => PrintReport(forCustomer: true);
         bRemove.Click += (s, e) => RemoveSelected();
+        bLogs.Click += (s, e) => { logsCard.Visible = !logsCard.Visible; bLogs.Text = logsCard.Visible ? "السجلات" : "إظهار السجلات"; bLogs.Invalidate(); };
         tCombine.CheckedChanged += (s, e) => ShowResult();
+        tCustomerReport.CheckedChanged += (s, e) => FillReport();
         foreach (var t in new[] { tLiquid, tBattery, tFlex, tScreen, tDrop }) t.CheckedChanged += (s, e) => { if (!loading) { dirty = true; Reanalyze(); } };
-        foreach (var c in new Control[] { customer, phone, notes }) c.TextChanged += (s, e) => { if (!loading) dirty = true; };
+        foreach (var c in new Control[] { customer, phone, notes, fixedPart }) c.TextChanged += (s, e) => { if (!loading) dirty = true; };
         status.SelectedIndexChanged += (s, e) => { if (!loading) dirty = true; };
         logsGrid.SelectionChanged += (s, e) => { if (!loading) ShowResult(); };
+        evidence.SelectionChanged += (s, e) => HighlightEvidence();
         previous.CellDoubleClick += (s, e) => { if (e.RowIndex >= 0) OpenRecord(Db.L(previous.Rows[e.RowIndex].Cells["id"].Value)); };
         DragEnter += (s, e) => e.Effect = e.Data.GetDataPresent(DataFormats.FileDrop) || e.Data.GetDataPresent(DataFormats.UnicodeText) ? DragDropEffects.Copy : DragDropEffects.None;
         DragDrop += (s, e) => Drop(e.Data);
@@ -179,39 +190,85 @@ public class AnalyzeForm : BaseForm
         // السجل المحفوظ يُحمَّل عند ظهور الشاشة (بعد ربط الجداول بالنافذة)
         if (rec != null) Load += (s, e) => LoadRecord(rec);
         ShowResult();
-        UpdateButtons();
     }
 
-    static Panel Wrap(Control c)
+    static Panel Pad(Control c)
     {
-        var p = new Panel { BackColor = Theme.Surface, Padding = new Padding(8) };
+        var p = new Panel { BackColor = Theme.Surface, Padding = new Padding(10) };
         c.Dock = DockStyle.Fill;
         p.Controls.Add(c);
         return p;
     }
 
+    Control EvidencePage()
+    {
+        var split = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal, BackColor = Theme.Border, SplitterWidth = 6 };
+        split.Panel1.BackColor = Theme.Surface;
+        split.Panel2.BackColor = Theme.Surface;
+        split.Panel1.Padding = new Padding(8);
+        split.Panel2.Padding = new Padding(8);
+        split.Panel1.Controls.Add(evidence);
+        var hint = new Label { Dock = DockStyle.Top, Height = 28, Text = "نص السجل — اختر دليلًا من الجدول ليُظلَّل مكانه هنا. يمكنك تعديل النص ثم «تحليل النص» (F9).", ForeColor = Theme.Muted, Font = Theme.F(9.5f), TextAlign = ContentAlignment.MiddleLeft, BackColor = Theme.Surface };
+        var rawHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.SurfaceAlt, Padding = new Padding(6) };
+        rawHost.Controls.Add(raw);
+        split.Panel2.Controls.Add(rawHost);
+        split.Panel2.Controls.Add(hint);
+        split.HandleCreated += (s, e) => { try { split.SplitterDistance = Math.Max(Dpi.S(120), split.Height * 45 / 100); } catch { } };
+        return split;
+    }
+
     Control CustomerPage()
     {
-        var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, BackColor = Theme.Surface, AutoScroll = true, Padding = new Padding(4, 8, 4, 4) };
+        var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, BackColor = Theme.Surface, AutoScroll = true, Padding = new Padding(6, 10, 6, 6) };
         flow.Controls.Add(Ui.Labeled("الزبون", customer));
         flow.Controls.Add(Ui.Labeled("الهاتف", phone));
         flow.Controls.Add(Ui.Labeled("حالة الجهاز", status));
         flow.SetFlowBreak(flow.Controls[^1], true);
+        flow.Controls.Add(Ui.Labeled("القطعة التي أصلحت الجهاز فعلًا (بعد الإصلاح)", fixedPart));
+        flow.Controls.Add(new Label
+        {
+            Text = "تسجيلها يحسب دقة البرنامج في محلك (التقارير ← دقة التشخيص) ويقترح قواعد جديدة لخبرة المحل.",
+            AutoSize = false, Width = 360, Height = 52, ForeColor = Theme.Muted, Font = Theme.F(9), TextAlign = ContentAlignment.BottomLeft, Margin = new Padding(6, 4, 6, 0),
+        });
+        flow.SetFlowBreak(flow.Controls[^1], true);
         flow.Controls.Add(Ui.Labeled("ملاحظات الفحص", notes));
         flow.SetFlowBreak(flow.Controls[^1], true);
-        var b = Theme.Btn("حفظ في السجل", Theme.Success, 150, "save");
-        b.Margin = new Padding(6, 12, 6, 4);
+        var b = Theme.Btn("حفظ في السجل", Theme.Success, 160, "save");
+        b.Margin = new Padding(6, 14, 6, 4);
         b.Click += (s, e) => SaveRecord(silent: false);
         flow.Controls.Add(b);
         flow.Controls.Add(new Label
         {
             Text = "يُحفظ نص السجلات الأصلي كما هو: عند فتح الفحص لاحقًا يُعاد تحليله بأحدث قاعدة معرفة وخبرة المحل.",
-            AutoSize = false, Width = 520, Height = 44, ForeColor = Theme.Muted, Font = Theme.F(9), TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(6, 10, 6, 0),
+            AutoSize = false, Width = 560, Height = 44, ForeColor = Theme.Muted, Font = Theme.F(9), TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(6, 14, 6, 0),
         });
         return flow;
     }
 
-    /// <summary>عرض نسبي للأعمدة يُطبَّق بعد كل ربط (مثل شاشة البحث في توافق)</summary>
+    Control PreviousPage()
+    {
+        var page = Pad(previous);
+        var top = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 48, BackColor = Theme.Surface, WrapContents = false };
+        bCompare = Theme.Btn("مقارنة مع الفحص المحدد", Theme.Brand, 210, "arrow-left-right");
+        bCompare.Height = 38;
+        bCompare.Click += (s, e) => CompareSelected();
+        top.Controls.Add(bCompare);
+        page.Controls.Add(lblPrev);
+        page.Controls.Add(top);
+        return page;
+    }
+
+    Control ReportPage()
+    {
+        var page = Pad(report);
+        var top = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 46, BackColor = Theme.Surface, WrapContents = false };
+        tCustomerReport.Margin = new Padding(6, 6, 6, 2);
+        top.Controls.Add(tCustomerReport);
+        page.Controls.Add(top);
+        return page;
+    }
+
+    /// <summary>عرض نسبي للأعمدة يُطبَّق بعد كل ربط</summary>
     static void FitColumns(DataGridView g, params (string Name, float Weight)[] cols)
     {
         g.ScrollBars = ScrollBars.Vertical;
@@ -222,7 +279,7 @@ public class AnalyzeForm : BaseForm
                 if (g.Columns.Contains(name))
                 {
                     var c = g.Columns[name];
-                    c.MinimumWidth = Dpi.S(name == "#" ? 36 : 60);
+                    c.MinimumWidth = Dpi.S(60);
                     c.FillWeight = w;
                 }
         };
@@ -231,7 +288,7 @@ public class AnalyzeForm : BaseForm
     // ============================================================== الإدخال
     void PickFiles()
     {
-        if (!Session.Guard("analyze")) return;
+        if (busy || !Session.Guard("analyze")) return;
         using var ofd = new OpenFileDialog
         {
             Multiselect = true, Title = "اختر ملفات البانك",
@@ -240,25 +297,46 @@ public class AnalyzeForm : BaseForm
         if (ofd.ShowDialog() == DialogResult.OK) AddFiles(ofd.FileNames);
     }
 
-    public void AddFiles(IEnumerable<string> files)
+    /// <summary>قراءة الملفات وتحليلها في الخلفية (مع التقدم) حتى لا تتجمد الشاشة مع عشرات الملفات</summary>
+    public async void AddFiles(IEnumerable<string> files)
     {
-        var skipped = new List<string>();
-        int before = logs.Count;
-        foreach (var f in files)
+        if (busy) return;
+        var list = files.ToList();
+        if (list.Count == 0) return;
+        busy = true;
+        UpdateButtons();
+        var progress = new Progress<int>(n => logsCard.Subtitle = $"جارٍ قراءة الملفات: {n} من {list.Count}…");
+        (List<PanicLog> Found, List<string> Skipped) result;
+        try
         {
-            try
+            result = await Task.Run(() =>
             {
-                var info = new FileInfo(f);
-                if (!info.Exists) continue;
-                if (info.Length > MaxFileBytes) { skipped.Add($"{info.Name}: حجمه أكبر من 20 ميغابايت"); continue; }
-                var found = PanicParser.ParseMany(File.ReadAllText(f, System.Text.Encoding.UTF8), info.Name);
-                if (found.Count == 0) skipped.Add($"{info.Name}: لا يحتوي سجل بانك");
-                logs.AddRange(found);
-            }
-            catch (Exception ex) { skipped.Add($"{Path.GetFileName(f)}: {ex.Message}"); }
+                var found = new List<PanicLog>();
+                var skipped = new List<string>();
+                IProgress<int> p = progress;
+                for (int i = 0; i < list.Count; i++)
+                {
+                    var f = list[i];
+                    try
+                    {
+                        var info = new FileInfo(f);
+                        if (!info.Exists) continue;
+                        if (info.Length > MaxFileBytes) { skipped.Add($"{info.Name}: حجمه أكبر من 20 ميغابايت"); continue; }
+                        var text = File.ReadAllText(f, System.Text.Encoding.UTF8);
+                        var logs = PanicParser.ParseMany(text, info.Name);
+                        if (logs.Count == 0) skipped.Add($"{info.Name}: " + (PanicParser.ExplainNonPanic(text, info.Name) ?? "لا يحتوي سجل بانك"));
+                        found.AddRange(logs);
+                    }
+                    catch (Exception ex) { skipped.Add($"{Path.GetFileName(f)}: {ex.Message}"); }
+                    p.Report(i + 1);
+                }
+                return (found, skipped);
+            });
         }
-        AfterAdd(before);
-        if (skipped.Count > 0) Dialogs.Message("لم تُقرأ بعض الملفات:\n" + string.Join("\n", skipped.Take(12)), "فتح الملفات", Tone.Warning);
+        finally { busy = false; }
+        if (IsDisposed) return;
+        Merge(result.Found);
+        if (result.Skipped.Count > 0) Dialogs.Message("لم تُقرأ بعض الملفات:\n" + string.Join("\n", result.Skipped.Take(12)), "فتح الملفات", Tone.Warning);
     }
 
     public void AddText(string text, string source)
@@ -266,17 +344,25 @@ public class AnalyzeForm : BaseForm
         var found = PanicParser.ParseMany(text ?? "", source);
         if (found.Count == 0)
         {
-            Ui.Warn("لم يُعثر على سجل بانك في النص.\nانسخ ملف panic-full كاملًا من الآيفون: الإعدادات ← الخصوصية والأمان ← التحليلات والتحسينات ← بيانات التحليلات.");
+            Ui.Warn(PanicParser.ExplainNonPanic(text) ??
+                "لم يُعثر على سجل بانك في النص.\nانسخ ملف panic-full كاملًا من الآيفون: الإعدادات ← الخصوصية والأمان ← التحليلات والتحسينات ← بيانات التحليلات.");
             return;
         }
-        int before = logs.Count;
-        logs.AddRange(found);
-        AfterAdd(before);
+        Merge(found);
     }
 
-    void AfterAdd(int before)
+    /// <summary>إضافة سجلات جديدة مع تجاهل المكرر (نفس رقم الحادثة أو نفس النص)</summary>
+    void Merge(List<PanicLog> found)
     {
-        if (logs.Count == before) return;
+        var known = logs.Select(l => l.Identity).ToHashSet();
+        int before = logs.Count, dup = 0;
+        foreach (var l in found)
+        {
+            if (!known.Add(l.Identity)) { dup++; continue; }
+            logs.Add(l);
+        }
+        if (dup > 0) Toast.Show($"تُجوهل {dup} سجل مكرر (أُضيف من قبل)", Tone.Info);
+        if (logs.Count == before) { Reanalyze(); return; }
         dirty = true;
         Reanalyze(select: logs.Count - 1);
         if (logs.Count - before > 1) Toast.Show($"أُضيف {logs.Count - before} سجلات");
@@ -285,7 +371,7 @@ public class AnalyzeForm : BaseForm
 
     void PasteClipboard()
     {
-        if (!Session.Guard("analyze")) return;
+        if (busy || !Session.Guard("analyze")) return;
         try
         {
             if (Clipboard.ContainsFileDropList()) { AddFiles(Clipboard.GetFileDropList().Cast<string>()); return; }
@@ -297,21 +383,27 @@ public class AnalyzeForm : BaseForm
 
     void Drop(IDataObject data)
     {
-        if (!Session.Can("analyze")) return;
+        if (busy || !Session.Can("analyze")) return;
         if (data.GetData(DataFormats.FileDrop) is string[] files) AddFiles(files);
         else if (data.GetData(DataFormats.UnicodeText) is string text) AddText(text, "نص مسحوب");
     }
 
-    /// <summary>تحليل ما في مربع النص: يستبدل السجل المحدد (بعد تعديله)، أو يضيف سجلًا جديدًا إن لم يكن هناك تحديد</summary>
+    /// <summary>تحليل ما في مربع نص السجل: يستبدل السجل المحدد (بعد تعديله)، أو يضيف سجلًا جديدًا إن لم يكن هناك تحديد</summary>
     void AnalyzeRawText()
     {
-        if (!Session.Guard("analyze")) return;
+        if (busy || !Session.Guard("analyze")) return;
         var text = raw.Text;
-        if (string.IsNullOrWhiteSpace(text)) { Ui.Warn("الصق نص السجل في مربع «نص السجل» أولًا، أو استخدم «لصق» أو «فتح ملفات»."); return; }
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            tabs.SelectedIndex = 2;
+            Ui.Warn("الصق نص السجل في «نص السجل» (تبويب الأدلة) أولًا، أو استخدم «لصق» أو «فتح ملفات».");
+            return;
+        }
         int i = SelectedIndex();
-        if (i < 0 || logs[i].Raw == PanicParser.Normalize(text)) { if (i < 0) AddText(text, "نص ملصوق"); else Reanalyze(i); return; }
+        if (i < 0) { AddText(text, "نص ملصوق"); return; }
+        if (logs[i].Raw == PanicParser.Normalize(text)) { Reanalyze(i); return; }
         var found = PanicParser.ParseMany(text, logs[i].Source);
-        if (found.Count == 0) { Ui.Warn("لم يُعثر على سجل بانك في النص بعد التعديل."); return; }
+        if (found.Count == 0) { Ui.Warn(PanicParser.ExplainNonPanic(text) ?? "لم يُعثر على سجل بانك في النص بعد التعديل."); return; }
         logs.RemoveAt(i);
         logs.InsertRange(i, found);
         dirty = true;
@@ -321,7 +413,7 @@ public class AnalyzeForm : BaseForm
     void RemoveSelected()
     {
         int i = SelectedIndex();
-        if (i < 0) return;
+        if (i < 0 || busy) return;
         logs.RemoveAt(i);
         dirty = true;
         Reanalyze(Math.Min(i, logs.Count - 1));
@@ -329,14 +421,16 @@ public class AnalyzeForm : BaseForm
 
     void ClearAll(bool ask)
     {
-        if (ask && logs.Count > 0 && !Ui.Confirm("مسح كل السجلات والبدء بفحص جديد؟")) return;
+        if (busy) return;
+        if (ask && logs.Count > 0 && dirty && Session.Can("history") && !Ui.Confirm("التحليل الحالي لم يُحفظ. بدء فحص جديد ومسح السجلات؟")) return;
         loading = true;
         logs.Clear();
         recordId = 0;
-        customer.Clear(); phone.Clear(); notes.Clear();
+        customer.Clear(); phone.Clear(); notes.Clear(); fixedPart.Text = "";
         status.SelectedIndex = 0;
         foreach (var t in new[] { tLiquid, tBattery, tFlex, tScreen, tDrop }) t.Checked = false;
         raw.Clear();
+        doneSteps.Clear();
         loading = false;
         dirty = false;
         Text = PageTitle;
@@ -347,7 +441,7 @@ public class AnalyzeForm : BaseForm
     {
         loading = true;
         recordId = rec.Id;
-        customer.Text = rec.Customer; phone.Text = rec.Phone; notes.Text = rec.Notes;
+        customer.Text = rec.Customer; phone.Text = rec.Phone; notes.Text = rec.Notes; fixedPart.Text = rec.FixedPart;
         status.SelectedIndex = Math.Max(0, Array.IndexOf(PanicStore.Statuses, rec.Status));
         tLiquid.Checked = rec.Flags.Liquid; tBattery.Checked = rec.Flags.BatteryReplaced; tFlex.Checked = rec.Flags.ChargingFlexReplaced;
         tScreen.Checked = rec.Flags.ScreenReplaced; tDrop.Checked = rec.Flags.Dropped;
@@ -379,25 +473,29 @@ public class AnalyzeForm : BaseForm
         diags.Clear();
         foreach (var l in logs) diags.Add(PanicAnalyzer.Analyze(l, flags, rules));
 
+        var groups = PanicAnalyzer.GroupDevices(logs);
         var dt = new DataTable();
         dt.Columns.Add("id", typeof(long));
-        foreach (var c in new[] { "#", "المصدر", "الجهاز", "النوع", "الأرجح" }) dt.Columns.Add(c);
+        dt.Columns.Add("#"); dt.Columns.Add("السجل");
         for (int i = 0; i < logs.Count; i++)
         {
             var d = diags[i];
-            dt.Rows.Add((long)i, (i + 1).ToString(), logs[i].Source + (d.Time != "" ? "  —  " + d.Time : ""), d.Device == "" ? "غير معروف" : d.Device, d.Kind, d.TopPart == "" ? "—" : d.TopPart);
+            var line1 = logs[i].Source + (d.Time != "" ? "  —  " + d.Time : "");
+            var line2 = (d.Device == "" ? "جهاز غير معروف" : d.Device) + "  •  " + d.Kind;
+            var line3 = d.TopPart == "" ? "" : "الأرجح: " + d.TopPart;
+            dt.Rows.Add((long)i, (i + 1) + (groups.Distinct().Count() > 1 ? "\n" + "جهاز " + (groups[i] + 1) : ""), string.Join("\n", new[] { line1, line2, line3 }.Where(x => x != "")));
         }
         loading = true;
         logsGrid.DataSource = dt;
         if (logs.Count > 0 && logsGrid.Rows.Count == logs.Count)
         {
             int row = Math.Clamp(select < 0 ? 0 : select, 0, logs.Count - 1);
-            logsGrid.CurrentCell = logsGrid.Rows[row].Cells["#"];
+            logsGrid.CurrentCell = logsGrid.Rows[row].Cells["السجل"];
         }
         loading = false;
-        int devices = logs.Select(l => l.DeviceKey).Where(k => k != "").Distinct().Count();
-        logsCard.Subtitle = logs.Count == 0 ? "افتح ملفات panic-full أو الصق النص — أو اسحب الملفات إلى هنا"
-            : $"{logs.Count} سجل" + (devices > 1 ? $" من {devices} أجهزة مختلفة" : "") + " — اختر سجلًا لعرض تحليله";
+        int devices = groups.Distinct().Count();
+        logsCard.Subtitle = logs.Count == 0 ? "افتح ملفات أو الصق النص — أو اسحب الملفات إلى هنا"
+            : $"{logs.Count} سجل" + (devices > 1 ? $" من {devices} أجهزة" : "");
         ShowResult();
     }
 
@@ -409,17 +507,20 @@ public class AnalyzeForm : BaseForm
         {
             shown = null;
             shownLogs = new();
-            raw.Text = logs.Count == 0 ? raw.Text : "";
+            if (logs.Count > 0) raw.Clear();
             verdict.Show(null, null);
-            causes.DataSource = null; steps.DataSource = null; evidence.DataSource = null; previous.DataSource = null;
+            causes.SetItems(Array.Empty<StackItem>());
+            steps.SetItems(Array.Empty<StackItem>());
+            evidence.DataSource = null; timeline.DataSource = null; previous.DataSource = null;
+            shownEvidence = new();
+            lblPrev.Text = ""; lblTimeline.Text = "";
             report.Text = "";
-            lblPrev.Text = "";
             UpdateButtons();
             return;
         }
-        raw.Text = logs[i].Raw.Replace("\n", "\r\n");
-        var key = logs[i].DeviceKey;
-        var group = Enumerable.Range(0, logs.Count).Where(k => k == i || (key != "" && logs[k].DeviceKey == key)).ToList();
+        raw.Text = logs[i].Raw;
+        var groups = PanicAnalyzer.GroupDevices(logs);
+        var group = Enumerable.Range(0, logs.Count).Where(k => groups[k] == groups[i]).ToList();
         if (tCombine.Checked && group.Count > 1)
         {
             shown = PanicAnalyzer.Combine(group.Select(k => diags[k]).ToList());
@@ -430,46 +531,95 @@ public class AnalyzeForm : BaseForm
             shown = diags[i];
             shownLogs = new List<PanicLog> { logs[i] };
         }
+
         var extra = new List<string>();
-        int devices = logs.Select(l => l.DeviceKey).Where(k => k != "").Distinct().Count();
+        int devices = groups.Distinct().Count();
         if (devices > 1) extra.Add($"في القائمة سجلات من {devices} أجهزة مختلفة — يُعرض تحليل جهاز السجل المحدد فقط.");
         if (!tCombine.Checked && group.Count > 1) extra.Add($"لهذا الجهاز {group.Count} سجلات — فعّل «تجميع سجلات الجهاز» لتحليلها معًا.");
+        try
+        {
+            long same = Session.Can("history") ? PanicStore.SameBuildDevices(shown) : 0;
+            if (same >= 2) extra.Add($"نفس النمط ظهر على {same} أجهزة أخرى بنفس iOS {shown.Build} — قد يكون السبب برمجيًا في هذا الإصدار.");
+        }
+        catch { }
         verdict.Show(shown, extra);
 
-        var ct = new DataTable();
-        foreach (var c in new[] { "#", "السبب / القطعة", "الحالة", "لماذا" }) ct.Columns.Add(c);
-        for (int k = 0; k < shown.Candidates.Count; k++) ct.Rows.Add((k + 1).ToString(), shown.Candidates[k].Part, shown.Candidates[k].Label, shown.Candidates[k].Why);
-        causes.DataSource = ct;
+        causes.SetItems(shown.Candidates.Select((c, k) => (StackItem)new CauseCard(k + 1, c)));
+        steps.SetItems(shown.Steps.Select((s, k) =>
+        {
+            var card = new StepCard(k + 1, s, doneSteps.Contains(s));
+            card.DoneChanged += (o, e) => { if (card.Done) doneSteps.Add(card.StepText); else doneSteps.Remove(card.StepText); };
+            return (StackItem)card;
+        }));
 
-        var st = new DataTable();
-        st.Columns.Add("#"); st.Columns.Add("الخطوة");
-        for (int k = 0; k < shown.Steps.Count; k++) st.Rows.Add((k + 1).ToString(), shown.Steps[k]);
-        steps.DataSource = st;
-
+        shownEvidence = shown.Evidence.ToList();
         var et = new DataTable();
+        et.Columns.Add("id", typeof(long));
         foreach (var c in new[] { "الدليل", "القيمة", "المعنى" }) et.Columns.Add(c);
-        foreach (var e in shown.Evidence) et.Rows.Add(e.What, e.Value, e.Meaning);
+        for (int k = 0; k < shownEvidence.Count; k++) et.Rows.Add((long)k, shownEvidence[k].What, shownEvidence[k].Value, shownEvidence[k].Meaning);
         evidence.DataSource = et;
 
-        report.Text = PanicAnalyzer.Report(shown).Replace("\n", "\r\n");
+        var tt = new DataTable();
+        foreach (var c in new[] { "الوقت", "النوع", "التشخيص", "الأرجح", "المصدر" }) tt.Columns.Add(c);
+        var items = shown.Timeline.Count > 0 ? shown.Timeline
+            : new List<TimelineItem> { new(shown.Log?.Time, shown.Time, shown.Kind, shown.Title, shown.TopPart, shown.Signature, shown.Log?.Source ?? "") };
+        foreach (var t in items) tt.Rows.Add(t.TimeText, t.Kind, t.Title, t.TopPart, t.Source);
+        timeline.DataSource = tt;
+        var gap = shown.Evidence.FirstOrDefault(e => e.What == "المدة بين البانكات");
+        lblTimeline.Text = items.Count < 2 ? "سجل واحد — افتح سجلات أخرى لنفس الجهاز لترى تكرار البانك مع الوقت."
+            : gap != null ? $"{items.Count} سجلات — المدة بين البانكات: {gap.Value} — {gap.Meaning}" : $"{items.Count} سجلات مرتبة من الأقدم";
+
+        FillReport();
+        var key = logs[i].DeviceKey;
         var prev = Session.Can("history") ? PanicStore.Previous(key, recordId) : new DataTable();
         previous.DataSource = prev;
         lblPrev.Text = key == "" ? "لا يوجد مفتاح جهاز في السجل لمطابقة الفحوصات السابقة."
-            : prev.Rows.Count == 0 ? "لم يُفحص هذا الجهاز من قبل في المحل." : $"هذا الجهاز فُحص {prev.Rows.Count} مرة من قبل — نقر مزدوج لفتح الفحص.";
+            : prev.Rows.Count == 0 ? "لم يُفحص هذا الجهاز من قبل في المحل." : $"هذا الجهاز فُحص {prev.Rows.Count} مرة من قبل — نقر مزدوج لفتح الفحص، أو قارن معه.";
         UpdateButtons();
+    }
+
+    void FillReport()
+    {
+        report.Text = shown == null ? "" : (tCustomerReport.Checked ? PanicAnalyzer.CustomerReport(shown, Settings.Get("shop_name")) : PanicAnalyzer.Report(shown)).Replace("\n", "\r\n");
+    }
+
+    /// <summary>تظليل مكان الدليل المحدد داخل نص السجل (يُبحث أيضًا بصيغة JSON حيث «/» مكتوبة «\/»)</summary>
+    void HighlightEvidence()
+    {
+        if (evidence.CurrentRow == null || !evidence.Columns.Contains("id")) return;
+        int k = (int)Db.L(evidence.CurrentRow.Cells["id"].Value);
+        if (k < 0 || k >= shownEvidence.Count) return;
+        var needle = shownEvidence[k].Needle;
+        if (string.IsNullOrEmpty(needle) || raw.TextLength == 0) return;
+        var text = raw.Text;
+        int at = text.IndexOf(needle, StringComparison.OrdinalIgnoreCase), len = needle.Length;
+        if (at < 0) { var alt = needle.Replace("/", "\\/"); at = text.IndexOf(alt, StringComparison.OrdinalIgnoreCase); len = alt.Length; }
+        raw.SuspendLayout();
+        raw.SelectAll();
+        raw.SelectionBackColor = raw.BackColor;
+        if (at >= 0)
+        {
+            raw.Select(at, len);
+            raw.SelectionBackColor = Theme.Amber;
+            raw.ScrollToCaret();
+        }
+        raw.Select(Math.Max(0, at), 0);
+        raw.ResumeLayout();
     }
 
     void UpdateButtons()
     {
-        bSave.Enabled = shown != null && Session.Can("history");
+        foreach (var b in new[] { bOpen, bPaste, bAnalyze, bClear }) b.Enabled = !busy;
+        bSave.Enabled = !busy && shown != null && Session.Can("history");
         bCopy.Enabled = shown != null;
-        bPrint.Enabled = shown != null && Session.Can("print");
-        bRemove.Enabled = logs.Count > 0;
+        bPrintTech.Enabled = bPrintCustomer.Enabled = shown != null && Session.Can("print");
+        bRemove.Enabled = !busy && logs.Count > 0;
+        bCompare.Enabled = shown != null && previous.Rows.Count > 0;
         bSave.Text = recordId > 0 ? "تحديث السجل" : "حفظ في السجل";
         bSave.Invalidate();
     }
 
-    // ============================================================== الحفظ والتقرير
+    // ============================================================== الحفظ والتقرير والمقارنة
     void SaveRecord(bool silent)
     {
         if (shown == null) { if (!silent) Ui.Warn("لا يوجد تحليل لحفظه."); return; }
@@ -478,8 +628,9 @@ public class AnalyzeForm : BaseForm
         {
             bool isNew = recordId == 0;
             // السجل الواحد يخص جهازًا واحدًا: تُحفظ سجلات الجهاز المعروض فقط
-            recordId = PanicStore.Save(recordId, shown, shownLogs, Flags(), customer.Text, phone.Text, notes.Text, status.Text);
+            recordId = PanicStore.Save(recordId, shown, shownLogs, Flags(), customer.Text, phone.Text, notes.Text, status.Text, fixedPart.Text);
             if (isNew) Db.Audit("حفظ فحص", $"رقم {recordId}: {shown.Device} — {shown.TopPart}");
+            if (fixedPart.Text.Trim() != "") Db.Audit("نتيجة فحص", $"رقم {recordId}: الأرجح {shown.TopPart} — أُصلح بـ {fixedPart.Text.Trim()}");
             dirty = false;
             Text = $"فحص رقم {recordId}";
             UpdateButtons();
@@ -491,34 +642,63 @@ public class AnalyzeForm : BaseForm
     void CopyReport()
     {
         if (shown == null) return;
-        try { Clipboard.SetText(PanicAnalyzer.Report(shown)); Toast.Show("نُسخ التقرير — الصقه في رسالة للزبون أو في ملاحظاتك"); }
+        try
+        {
+            Clipboard.SetText(tCustomerReport.Checked ? PanicAnalyzer.CustomerReport(shown, Settings.Get("shop_name")) : PanicAnalyzer.Report(shown));
+            Toast.Show(tCustomerReport.Checked ? "نُسخ تقرير الزبون — الصقه في رسالة" : "نُسخ تقرير الفني");
+        }
         catch (Exception ex) { Ui.Warn("تعذر النسخ: " + ex.Message); }
     }
 
-    void PrintReport()
+    /// <summary>طباعة تقرير الفني (كل الأسباب والخطوات) أو تقرير الزبون (مبسّط بلا رموز)</summary>
+    void PrintReport(bool forCustomer)
     {
         if (shown == null || !Session.Guard("print")) return;
         var d = shown;
-        var doc = PrintDoc.Header("تقرير فحص الجهاز");
+        var doc = PrintDoc.Header(forCustomer ? "تقرير فحص الجهاز" : "تقرير فحص الجهاز — للفني");
         doc.ForceA4 = true;
         doc.Pair("الزبون", customer.Text.Trim() == "" ? "—" : customer.Text.Trim(), "الهاتف", phone.Text.Trim() == "" ? "—" : phone.Text.Trim());
-        doc.Pair("الجهاز", d.Device == "" ? "غير معروف" : d.Device, "iOS", d.Ios == "" ? "—" : d.Ios + (d.Build != "" ? $" ({d.Build})" : ""));
-        doc.Pair("وقت البانك", d.Time == "" ? "—" : d.Time, "رقم الفحص", recordId > 0 ? recordId.ToString() : "غير محفوظ");
+        doc.Pair("الجهاز", d.Device == "" ? "غير معروف" : d.Device, "رقم الفحص", recordId > 0 ? recordId.ToString() : "غير محفوظ");
         doc.Line();
-        doc.Text(d.Title, 12, true);
-        doc.Text(d.Summary, 10.5f);
-        doc.Text("درجة الثقة: " + d.Confidence + (d.LogCount > 1 ? $" — مبنية على {d.LogCount} سجلات" : ""), 9.5f);
-        doc.Space(6);
-        doc.Table(new[] { "#", "السبب / القطعة", "الدرجة", "لماذا" }, new[] { 6f, 32, 14, 48 },
-            d.Candidates.Select((c, k) => new[] { (k + 1).ToString(), c.Part, c.Label, c.Why }).ToList());
-        if (d.Steps.Count > 0)
+        if (forCustomer)
         {
-            doc.Space(6);
-            doc.Table(new[] { "#", "خطوات الفحص" }, new[] { 6f, 94 }, d.Steps.Select((s, k) => new[] { (k + 1).ToString(), s }).ToList());
+            doc.Text("المشكلة: " + PanicAnalyzer.CustomerProblem(d), 11);
+            if (d.TopPart != "") doc.Text("السبب المرجّح: " + d.TopPart + (d.Candidates.Count > 1 ? " (وقد يكون: " + d.Candidates[1].Part + ")" : ""), 11, true);
+            doc.Text("درجة الثقة: " + d.Confidence, 10);
+            if (fixedPart.Text.Trim() != "") doc.Text("ما تم إصلاحه: " + fixedPart.Text.Trim(), 11, true);
+            doc.Space(8);
+            doc.Text("التشخيص مبني على سجل الأعطال الذي يحفظه الجهاز، ويُؤكَّد بالفحص العملي قبل تبديل أي قطعة.", 9);
         }
-        if (notes.Text.Trim() != "") { doc.Space(6); doc.Text("ملاحظات الفحص: " + notes.Text.Trim(), 10); }
+        else
+        {
+            doc.Pair("iOS", d.Ios == "" ? "—" : d.Ios + (d.Build != "" ? $" ({d.Build})" : ""), "وقت البانك", d.Time == "" ? "—" : d.Time);
+            doc.Text(d.Title, 12, true);
+            doc.Text(d.Summary, 10.5f);
+            doc.Text("درجة الثقة: " + d.Confidence + (d.LogCount > 1 ? $" — مبنية على {d.LogCount} سجلات" : ""), 9.5f);
+            doc.Space(6);
+            doc.Table(new[] { "#", "السبب / القطعة", "الدرجة", "لماذا" }, new[] { 6f, 32, 14, 48 },
+                d.Candidates.Select((c, k) => new[] { (k + 1).ToString(), c.Part, c.Label, c.Why }).ToList());
+            if (d.Steps.Count > 0)
+            {
+                doc.Space(6);
+                doc.Table(new[] { "#", "خطوات الفحص", "تم" }, new[] { 6f, 84, 10 }, d.Steps.Select((s, k) => new[] { (k + 1).ToString(), s, doneSteps.Contains(s) ? "✓" : "" }).ToList());
+            }
+            if (notes.Text.Trim() != "") { doc.Space(6); doc.Text("ملاحظات الفحص: " + notes.Text.Trim(), 10); }
+        }
         doc.Footer();
         doc.Print();
+    }
+
+    void CompareSelected()
+    {
+        if (shown == null || previous.CurrentRow == null || !previous.Columns.Contains("id")) { Ui.Warn("اختر فحصًا سابقًا من الجدول."); return; }
+        var rec = PanicStore.Load(Db.L(previous.CurrentRow.Cells["id"].Value));
+        if (rec == null) return;
+        var rules = PanicStore.Rules();
+        var ds = rec.Logs.Select(x => PanicParser.Parse(x.Raw, x.Source)).Where(l => !l.IsEmpty).Select(l => PanicAnalyzer.Analyze(l, rec.Flags, rules)).ToList();
+        if (ds.Count == 0) { Ui.Warn("الفحص السابق لا يحتوي سجلات قابلة للتحليل."); return; }
+        using var dlg = new CompareDialog(shown, "الفحص الحالي", PanicAnalyzer.Combine(ds), $"فحص رقم {rec.Id} ({Ui.Cut(rec.Date, 10)})", fixedPart.Text.Trim(), rec.FixedPart);
+        dlg.ShowModal();
     }
 
     public override bool ConfirmClose() =>
@@ -527,7 +707,7 @@ public class AnalyzeForm : BaseForm
     public override void OnPageActivated()
     {
         // خبرة المحل قد تغيّرت من شاشة أخرى: يُعاد التحليل بالقواعد الجديدة
-        if (logs.Count > 0) Reanalyze();
+        if (logs.Count > 0 && !busy) Reanalyze();
     }
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
@@ -536,7 +716,7 @@ public class AnalyzeForm : BaseForm
         {
             case Keys.Control | Keys.O: PickFiles(); return true;
             case Keys.Control | Keys.S: SaveRecord(silent: false); return true;
-            case Keys.Control | Keys.P: PrintReport(); return true;
+            case Keys.Control | Keys.P: PrintReport(forCustomer: false); return true;
             case Keys.Control | Keys.V when !raw.Focused && ActiveControl is not TextBoxBase: PasteClipboard(); return true;
             case Keys.F9: AnalyzeRawText(); return true;
         }
@@ -544,89 +724,46 @@ public class AnalyzeForm : BaseForm
     }
 }
 
-/// <summary>بطاقة الخلاصة: عنوان التشخيص والخلاصة ودرجة الثقة والجهاز والتنبيهات — أو إرشاد البدء إن لم يوجد سجل</summary>
-public class VerdictPanel : Control
+/// <summary>مقارنة فحصين لنفس الجهاز جنبًا إلى جنب (مثل قبل الإصلاح وبعده)</summary>
+public class CompareDialog : DialogShell
 {
-    Diagnosis d;
-    List<string> extra = new();
-
-    public VerdictPanel()
+    public CompareDialog(Diagnosis a, string aTitle, Diagnosis b, string bTitle, string aFixed, string bFixed) : base("مقارنة فحصين", 980, 620, "arrow-left-right")
     {
-        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-    }
-
-    public void Show(Diagnosis diagnosis, List<string> extraWarnings)
-    {
-        d = diagnosis;
-        extra = extraWarnings ?? new();
-        Invalidate();
-    }
-
-    static Color ConfColor(string c) => c switch { "عالية" => Theme.Success, "متوسطة" => Theme.Warning, _ => Theme.Gray };
-
-    protected override void OnPaint(PaintEventArgs e)
-    {
-        var g = e.Graphics;
-        g.Clear(Gfx.OpaqueBack(this));
-        Gfx.Hq(g);
-        int S(int v) => Dpi.S(v);
-        var r = new RectangleF(S(2), 0.5f, Width - S(4), Height - S(5));
-        Gfx.Shadow(g, r, S(14));
-        Gfx.FillRound(g, r, S(14), Theme.Surface);
-        Gfx.DrawRound(g, r, S(14), Theme.Border);
-
-        var accent = d == null ? Theme.Brand : ConfColor(d.Confidence);
-        // شريط لوني في بداية البطاقة (الجهة اليمنى) حسب درجة الثقة
-        Gfx.FillRound(g, new RectangleF(r.Right - S(8), r.Y + S(14), S(5), r.Height - S(28)), S(3), accent);
-
-        int right = (int)r.Right - S(28), left = (int)r.X + S(22);
-        int box = S(46);
-        var ir = new RectangleF(right - box, S(20), box, box);
-        Gfx.FillRound(g, ir, S(14), Gfx.Mix(accent, Color.White, 0.86f));
-        Icons.Draw(g, d == null ? "scan-line" : d.Confidence == "عالية" ? "badge-check" : "circle-alert", ir, accent, 24);
-        int tx = (int)ir.X - S(14);
-        const TextFormatFlags wrap = TextFormatFlags.Right | TextFormatFlags.RightToLeft | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis;
-
-        if (d == null)
+        var grid = Ui.NewGrid();
+        grid.DefaultCellStyle.WrapMode = DataGridViewTriState.True;
+        grid.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCells;
+        var dt = new System.Data.DataTable();
+        dt.Columns.Add("البند"); dt.Columns.Add(aTitle); dt.Columns.Add(bTitle); dt.Columns.Add("تغيّر؟");
+        void Row(string item, string x, string y) => dt.Rows.Add(item, x, y, x == y ? "" : "●");
+        string Top(Diagnosis d, int n) => string.Join("\n", d.Candidates.Take(n).Select((c, i) => $"{i + 1}. {c.Part} ({c.Label})"));
+        Row("الجهاز", a.Device, b.Device);
+        Row("وقت البانك", a.Time, b.Time);
+        Row("iOS", a.Ios + (a.Build != "" ? $" ({a.Build})" : ""), b.Ios + (b.Build != "" ? $" ({b.Build})" : ""));
+        Row("عدد السجلات", a.LogCount.ToString(), b.LogCount.ToString());
+        Row("النوع", a.Kind, b.Kind);
+        Row("التشخيص", a.Title, b.Title);
+        Row("الحساسات المفقودة", string.Join("، ", a.MissingSensors), string.Join("، ", b.MissingSensors));
+        Row("الخدمة المتوقفة", a.WatchdogService, b.WatchdogService);
+        Row("بصمة النمط", a.Signature, b.Signature);
+        Row("الأسباب الأرجح", Top(a, 3), Top(b, 3));
+        Row("الثقة", a.Confidence, b.Confidence);
+        Row("القطعة المُصلِحة", aFixed, bFixed);
+        grid.DataSource = dt;
+        grid.DataBindingComplete += (s, e) =>
         {
-            TextRenderer.DrawText(g, "الصق سجل البانك أو افتح ملف panic-full", Theme.FS(14), new Rectangle(left, S(18), tx - left, S(30)), Theme.Ink, Gfx.RtlStart);
-            TextRenderer.DrawText(g,
-                "على الآيفون: الإعدادات ← الخصوصية والأمان ← التحليلات والتحسينات ← بيانات التحليلات ← الملف الذي يبدأ بـ panic-full. " +
-                "افتحه ثم شاركه أو انسخ نصه كاملًا. يقبل البرنامج أكثر من ملف معًا، والنص المنسوخ من صورة أيضًا.",
-                Theme.F(10), new Rectangle(left, S(54), tx - left, S(66)), Theme.Text2, wrap);
-            TextRenderer.DrawText(g, "اختصارات: Ctrl+O فتح ملفات  •  Ctrl+V لصق  •  F9 تحليل النص  •  Ctrl+S حفظ  •  Ctrl+P طباعة",
-                Theme.F(9), new Rectangle(left, Height - S(44), right - left, S(24)), Theme.Muted, Gfx.RtlStart);
-            return;
-        }
-
-        var device = string.Join("  •  ", new[]
+            if (grid.Columns.Contains("البند")) grid.Columns["البند"].FillWeight = 18;
+            if (grid.Columns.Contains(aTitle)) grid.Columns[aTitle].FillWeight = 38;
+            if (grid.Columns.Contains(bTitle)) grid.Columns[bTitle].FillWeight = 38;
+            if (grid.Columns.Contains("تغيّر؟")) grid.Columns["تغيّر؟"].FillWeight = 6;
+        };
+        var note = new Label
         {
-            d.Device == "" ? "جهاز غير معروف" : d.Device, d.Soc, d.Ios != "" ? "iOS " + d.Ios + (d.Build != "" ? $" ({d.Build})" : "") : "",
-            d.LogCount > 1 ? $"{d.LogCount} سجلات" : d.Time,
-        }.Where(x => !string.IsNullOrEmpty(x)));
-        TextRenderer.DrawText(g, Theme.Bidi(device), Theme.F(9.5f), new Rectangle(left, S(16), tx - left, S(22)), Theme.Muted, Gfx.RtlStart);
-        TextRenderer.DrawText(g, Theme.Bidi(d.Title), Theme.FS(14), new Rectangle(left, S(38), tx - left, S(30)), Theme.Ink, Gfx.RtlStart);
-        TextRenderer.DrawText(g, d.Summary, Theme.F(10.5f), new Rectangle(left, S(72), right - left, S(46)), Theme.Text2, wrap);
-
-        // شارات: الثقة، النوع، الأرجح
-        int x = right;
-        void Chip(string text, Color fg, Color bg)
-        {
-            var f = Theme.FS(9);
-            int w = TextRenderer.MeasureText(g, text, f, Size.Empty, TextFormatFlags.NoPadding).Width + S(22);
-            if (x - w < left) return;
-            var cr = new Rectangle(x - w, S(122), w, S(26));
-            Gfx.FillRound(g, cr, cr.Height / 2f, bg);
-            TextRenderer.DrawText(g, text, f, cr, fg, Gfx.Center);
-            x -= w + S(8);
-        }
-        Chip("الثقة: " + d.Confidence, ConfColor(d.Confidence), Gfx.Mix(ConfColor(d.Confidence), Color.White, 0.86f));
-        Chip(d.Kind, Theme.Brand, Theme.BrandSoft);
-        if (d.TopPart != "") Chip("الأرجح: " + d.TopPart, Theme.Danger, Theme.DangerSoft);
-
-        var warns = extra.Concat(d.Warnings).ToList();
-        if (warns.Count > 0)
-            TextRenderer.DrawText(g, "⚠ " + warns[0] + (warns.Count > 1 ? $"  (+{warns.Count - 1} تنبيه آخر)" : ""), Theme.F(9),
-                new Rectangle(left, Height - S(40), right - left, S(24)), Theme.Warning, Gfx.RtlStart);
+            Dock = DockStyle.Top, Height = 40, ForeColor = Theme.Text2, Font = Theme.F(10), TextAlign = ContentAlignment.MiddleLeft,
+            Text = a.Signature != "" && a.Signature == b.Signature ? "نفس النمط في الفحصين: المشكلة لم تتغير (إن بُدّلت قطعة بينهما فلم تكن هي السبب)."
+                : "النمط تغيّر بين الفحصين: راجع ما بُدّل بينهما.",
+        };
+        Body.Controls.Add(grid);
+        Body.Controls.Add(note);
+        AddButton("إغلاق", DialogResult.OK, BtnKind.Secondary, "x");
     }
 }

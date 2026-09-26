@@ -17,6 +17,8 @@
   <ItemGroup>
     <!-- الخطوط مضمّنة داخل البرنامج: لا حاجة لتثبيتها على جهاز المستخدم -->
     <EmbeddedResource Include="Assets\*.ttf" />
+    <!-- قاعدة المعرفة: رموز الحساسات ومفاتيح SMC والخدمات وتواقيع البانك (مع مصدر ودرجة لكل معلومة) -->
+    <EmbeddedResource Include="Data\knowledge.json" LogicalName="Kashif.knowledge.json" />
     <None Include="Assets\*.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

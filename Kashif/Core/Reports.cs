@@ -5,10 +5,12 @@ namespace Kashif;
 /// <summary>استعلامات التقارير (مفصولة عن الشاشة لتُستخدم في الطباعة والتصدير)</summary>
 public static class Reports
 {
-    public static readonly string[] Kinds = { "الأعطال الأكثر تكرارًا", "حسب نوع البانك", "حسب الجهاز", "سجل العمليات" };
+    public static readonly string[] Kinds = { "دقة التشخيص", "قواعد مقترحة", "الأعطال الأكثر تكرارًا", "حسب نوع البانك", "حسب الجهاز", "سجل العمليات" };
 
     public static string Subtitle(string kind) => kind switch
     {
+        "دقة التشخيص" => "الفحوصات التي سُجّلت قطعتها المُصلِحة: كم مرة كان الأرجح صحيحًا، وكم مرة كانت ضمن أول 3",
+        "قواعد مقترحة" => "نمط تكرر 3 مرات مع نفس القطعة المُصلِحة وأخطأ فيه البرنامج — نقر مزدوج لإضافته إلى خبرة المحل",
         "الأعطال الأكثر تكرارًا" => "القطعة الأرجح في كل فحص — ما يستحق التخزين أولًا",
         "حسب نوع البانك" => "حساس مفقود، SMC، مراقب النظام، التخزين ...",
         "حسب الجهاز" => "الموديلات الأكثر وصولًا بالبانك",
@@ -20,6 +22,10 @@ public static class Reports
         string d1 = from.ToString(Ui.DFmt), d2 = to.ToString(Ui.DFmt) + " 23:59:59";
         switch (kind)
         {
+            case "دقة التشخيص":
+                return Db.Query(StoreSql.Accuracy, d1, d2);
+            case "قواعد مقترحة":
+                return Db.Query(StoreSql.Suggestions, 3L);
             case "الأعطال الأكثر تكرارًا":
                 return Db.Query(@"SELECT 0 AS id, top_part AS [القطعة الأرجح], COUNT(*) AS [عدد الفحوصات],
                         SUM(CASE WHEN confidence='عالية' THEN 1 ELSE 0 END) AS [بثقة عالية],

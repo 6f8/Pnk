@@ -62,11 +62,26 @@ public class ReportsForm : BaseForm
         dt.DefaultView.RowFilter = q == "" || textCols.Count == 0 ? "" : string.Join(" OR ", textCols);
     }
 
-    /// <summary>نقر مزدوج: فتح سجل الفحوصات مفلترًا بالقطعة أو النوع أو الجهاز</summary>
+    /// <summary>نقر مزدوج: إضافة قاعدة مقترحة إلى خبرة المحل، أو فتح سجل الفحوصات مفلترًا بالقطعة أو النوع أو الجهاز</summary>
     void Drill(int row)
     {
         if (row < 0 || kind == "سجل العمليات" || grid.Columns.Count < 2) return;
+        if (kind == "قواعد مقترحة") { AddSuggested(row); return; }
         var value = Db.S(grid.Rows[row].Cells[1].Value);
-        if (value != "") HistoryForm.OpenFiltered(value);
+        if (value != "" && value != "الكل") HistoryForm.OpenFiltered(value);
+    }
+
+    void AddSuggested(int row)
+    {
+        if (!Session.Guard("kb")) return;
+        string Cell(string c) => grid.Columns.Contains(c) ? Db.S(grid.Rows[row].Cells[c].Value) : "";
+        string pattern = Cell("النمط"), device = Cell("الجهاز"), part = Cell("القطعة المُصلِحة"), times = Cell("مرات");
+        if (pattern == "" || part == "") return;
+        if (!Ui.Confirm($"إضافة قاعدة إلى خبرة المحل؟\n\n«{pattern}»" + (device != "" ? $" على {device}" : "") + $" ← {part}\n(تكرر {times} مرات في فحوصات المحل)")) return;
+        Db.Insert("INSERT INTO kb_rules(name, pattern, device, part, level, note, active, is_regex, priority) VALUES(@p0,@p1,@p2,@p3,'شائع',@p4,1,0,0)",
+            "مقترحة من النتائج", pattern, device, part, $"تكررت {times} مرات مع نفس القطعة المُصلِحة");
+        Db.Audit("خبرة المحل", $"قاعدة مقترحة: {pattern} ← {part}");
+        Reload();
+        Toast.Show("أُضيفت القاعدة — عدّل درجتها من «خبرة المحل» إن أردت");
     }
 }

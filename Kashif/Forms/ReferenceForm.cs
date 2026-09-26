@@ -10,32 +10,29 @@ public class ReferenceForm : BaseForm
 {
     public const string PageTitle = "دليل رموز البانك";
 
-    sealed record Entry(string Type, string Code, string What, Func<AppleDevices.Family, List<PanicKnowledge.Choice>> Choices, string Note, string[] Steps);
+    sealed record Entry(string Type, string Code, string What, Func<string, List<PanicKnowledge.Choice>> Choices, string Note, string[] Steps, string Source = "", string Level = "");
 
     readonly TextBox search = new() { Width = 420, PlaceholderText = "رمز أو كلمة من السجل — مثل Prs0 أو TG0B أو thermalmonitord أو SMC" };
-    readonly ComboBox cbFamily = Ui.Combo(230);
+    readonly ComboBox cbModel = Ui.Combo(260);
     readonly DataGridView list = Ui.NewGrid(), parts = Ui.NewGrid();
     readonly CardPanel listCard, detailCard;
     readonly Label note = new() { Dock = DockStyle.Top, AutoSize = false, Height = 64, ForeColor = Theme.Text2, Font = Theme.F(10), BackColor = Theme.Surface, TextAlign = ContentAlignment.TopLeft };
     readonly Label stepsText = new() { Dock = DockStyle.Bottom, AutoSize = false, Height = 110, ForeColor = Theme.Text2, Font = Theme.F(9.5f), BackColor = Theme.Surface, TextAlign = ContentAlignment.TopLeft };
     List<Entry> all = new(), shown = new();
 
-    static readonly (string Name, AppleDevices.Family Family)[] Families =
-    {
-        ("iPhone X إلى 11 Pro Max", AppleDevices.Family.X11),
-        ("iPhone 12 وما بعده", AppleDevices.Family.Later),
-        ("iPhone 8 وما قبله و SE", AppleDevices.Family.Early),
-    };
-
     public ReferenceForm()
     {
         Text = PageTitle;
-        foreach (var f in Families) cbFamily.Items.Add(f.Name);
-        cbFamily.SelectedIndex = 0;
+        // الموديل يحدد أماكن الحساسات: معلومة الموديل إن وُثّقت، وإلا جيله، وإلا الأماكن العامة
+        cbModel.Items.Add(new Opt { Name = "عام (بلا موديل محدد)", Tag = "" });
+        foreach (var (product, model) in AppleDevices.All.GroupBy(x => x.Model.Name).Select(g => g.First()).OrderBy(x => x.Model.Family == AppleDevices.Family.IPad).ThenBy(x => x.Product, StringComparer.Ordinal))
+            cbModel.Items.Add(new Opt { Name = model.Name, Tag = product });
+        cbModel.SelectedIndex = 0;
+        Ui.MakeSearchable(cbModel);
 
         var bar = Theme.Bar();
         bar.Controls.Add(new InputBox(search, 440, "search") { Height = 42, Margin = new Padding(6, 2, 6, 2) });
-        bar.Controls.Add(new InputBox(cbFamily, 240) { Height = 42, Margin = new Padding(6, 2, 6, 2) });
+        bar.Controls.Add(new InputBox(cbModel, 270) { Height = 42, Margin = new Padding(6, 2, 6, 2) });
 
         listCard = new CardPanel { Dock = DockStyle.Fill, Title = "الرموز", IconName = "book-open", Margin = new Padding(14, 0, 0, 0) };
         listCard.Controls.Add(list);
@@ -64,7 +61,7 @@ public class ReferenceForm : BaseForm
         Controls.Add(bar);
 
         Ui.OnTextIdle(search, Filter, 250);
-        cbFamily.SelectedIndexChanged += (s, e) => ShowSelected();
+        cbModel.SelectedIndexChanged += (s, e) => ShowSelected();
         list.SelectionChanged += (s, e) => ShowSelected();
         Build();
         Filter();
@@ -73,29 +70,30 @@ public class ReferenceForm : BaseForm
 
     public override void OnPageActivated() { Build(); Filter(); }
 
-    AppleDevices.Family Family => Families[Math.Max(0, cbFamily.SelectedIndex)].Family;
+    string Product => cbModel.SelectedItem is Opt { Tag: string p } ? p : "";
 
     void Build()
     {
         var e = new List<Entry>();
         foreach (var s in PanicKnowledge.Sensors)
-            e.Add(new("حساس", s.Code, s.What, f => s.Locate(f).ToList(), s.Note,
-                new[] { "افحص القطعة الأرجح وموصلها.", "شغّل الجهاز والقطعة مفصولة: يظهر نفس الرمز.", "ركّب قطعة سليمة: إن اختفى البانك فهي السبب.", "إن بقي: خط الحساس على البوردة." }));
+            e.Add(new("حساس", s.Code, s.What, p => s.LocateFor(p, AppleDevices.FamilyOf(p)).Choices.ToList(), s.Note,
+                new[] { "افحص القطعة الأرجح وموصلها.", "شغّل الجهاز والقطعة مفصولة: يظهر نفس الرمز.", "ركّب قطعة سليمة: إن اختفى البانك فهي السبب.", "إن بقي: خط الحساس على البوردة." }, s.Source, s.Level));
         foreach (var s in PanicKnowledge.Services)
-            e.Add(new("خدمة", s.Name, s.What, f => s.Choices.ToList(), $"يظهر في سطر «no successful checkins from {s.Name}». درجة الثقة: {s.Confidence}.", s.Steps));
+            e.Add(new("خدمة", s.Name, s.What, p => s.Choices.ToList(), $"يظهر في سطر «no successful checkins from {s.Name}». درجة الثقة: {s.Confidence}.", s.Steps, s.Source, s.Level));
         foreach (var s in PanicKnowledge.Signatures)
-            e.Add(new("نوع بانك", s.Kind, s.Title, f => s.Choices.ToList(), s.Explain, s.Steps));
-        foreach (var k in PanicKnowledge.SmcKeys)
-            e.Add(new("مفتاح SMC", k.Key, k.Value, f => PanicKnowledge.IsBatteryKey(k.Key)
+            e.Add(new("نوع بانك", s.Kind, s.Title, p => s.Choices.ToList(), s.Explain, s.Steps, s.Source, s.Level));
+        foreach (var k in PanicKnowledge.Current.SmcKeys.Values)
+            e.Add(new("مفتاح SMC", k.Key, k.Meaning, p => k.Battery
                     ? new List<PanicKnowledge.Choice> { new(Parts.Battery, 75, "مفتاح بطارية"), new(Parts.BatteryConn, 65, "الموصل أو الفلاتة"), new(Parts.SmcLine, 42, "خط الاتصال على البوردة") }
                     : new List<PanicKnowledge.Choice>(),
-                "يظهر مشفّرًا في رسائل Mailbox داخل بانك SMC: أول 4 بايت من القيمة ‎0x…‎ حروف مقروءة. البرنامج يفكّها تلقائيًا.", Array.Empty<string>()));
-        e.Add(new("مفتاح SMC", "B…", "أي مفتاح يبدأ بحرف B", f => new List<PanicKnowledge.Choice> { new(Parts.Battery, 70, "مفاتيح B تخص البطارية وشريحة قياس الشحن") },
-            "حسب تسمية Apple: B بطارية، T حرارة، V جهد، I تيار، P طاقة.", Array.Empty<string>()));
+                "يظهر مشفّرًا في رسائل Mailbox داخل بانك SMC: أول 4 بايت من القيمة ‎0x…‎ حروف مقروءة. البرنامج يفكّها تلقائيًا.", Array.Empty<string>(), k.Source, "مؤكد"));
+        e.Add(new("مفتاح SMC", "B…", "أي مفتاح يبدأ بحرف B وليس في القائمة", p => new List<PanicKnowledge.Choice> { new(Parts.Battery, 58, "دليل ضعيف: الحرف B للبطارية في تسمية Apple، لكن المفتاح غير موثّق بالاسم") },
+            "حسب تسمية Apple: B بطارية، T حرارة، V جهد، I تيار، P طاقة. المفاتيح غير الموثّقة بالاسم تُعامل كدليل ضعيف.", Array.Empty<string>(), "تسمية Apple لمفاتيح SMC", "محتمل"));
         if (Session.Can("kb") || Session.Can("analyze"))
             foreach (var r in PanicStore.Rules())
-                e.Add(new("خبرة المحل", r.Pattern, r.Name, f => new List<PanicKnowledge.Choice> { new(r.Part, r.Score, (r.Device != "" ? $"({r.Device}) " : "") + r.Note) },
-                    $"من «خبرة المحل» — الدرجة: {r.Level}" + (r.Device != "" ? $" — للجهاز: {r.Device}" : ""), Array.Empty<string>()));
+                e.Add(new("خبرة المحل", r.Pattern, r.Name, p => new List<PanicKnowledge.Choice> { new(r.Part, r.Score, (r.Device != "" ? $"({r.Device}) " : "") + r.Note) },
+                    $"من «خبرة المحل»" + (r.IsRegex ? " (تعبير منتظم)" : "") + (r.Priority != 0 ? $" — أولوية {r.Priority}" : "") + (r.Device != "" ? $" — للجهاز: {r.Device}" : ""),
+                    Array.Empty<string>(), "خبرة المحل", r.Level));
         all = e;
     }
 
@@ -125,12 +123,16 @@ public class ReferenceForm : BaseForm
         }
         var x = shown[i];
         detailCard.Title = Theme.Bidi($"{x.Code} — {x.What}");
-        detailCard.Subtitle = x.Type + (x.Type == "حساس" ? "  —  الجيل: " + cbFamily.Text : "");
+        detailCard.Subtitle = string.Join("  —  ", new[]
+        {
+            x.Type, x.Level != "" ? "الدرجة: " + x.Level : "", x.Source != "" ? "المصدر: " + x.Source : "",
+            x.Type == "حساس" ? "الموديل: " + cbModel.Text : "",
+        }.Where(t => t != ""));
         note.Text = x.Note;
         stepsText.Text = x.Steps.Length == 0 ? "" : "خطوات الفحص:\n" + string.Join("\n", x.Steps.Select((s, k) => $"{k + 1}. {s}"));
         var dt = new DataTable();
         foreach (var c in new[] { "القطعة / السبب", "الحالة", "لماذا" }) dt.Columns.Add(c);
-        var choices = x.Choices(Family).OrderByDescending(c => c.Score).ToList();
+        var choices = x.Choices(Product).OrderByDescending(c => c.Score).ToList();
         for (int k = 0; k < choices.Count; k++)
             dt.Rows.Add(choices[k].Part, PanicAnalyzer.LabelOf(choices[k].Score, k == 0 && (choices.Count == 1 || choices[0].Score - choices[1].Score >= 10)), choices[k].Why);
         parts.DataSource = dt;

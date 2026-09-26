@@ -9,7 +9,7 @@ namespace Kashif;
 public static class AppleDevices
 {
     /// <summary>الأجيال المتقاربة في أماكن الحساسات (تُستخدم في قاعدة المعرفة)</summary>
-    public enum Family { Unknown, Early, X11, Later }
+    public enum Family { Unknown, Early, X11, Later, IPad }
 
     public sealed record Model(string Name, Family Family);
 
@@ -62,6 +62,63 @@ public static class AppleDevices
         ["iPhone18,1"] = new("iPhone 17 Pro", Family.Later),
         ["iPhone18,2"] = new("iPhone 17 Pro Max", Family.Later),
         ["iPhone18,4"] = new("iPhone Air", Family.Later),
+        // iPad: نفس صيغة البانك، وأماكن الحساسات تختلف عن الآيفون (تُستخدم الأماكن العامة)
+        ["iPad7,5"] = new("iPad (6th gen)", Family.IPad),
+        ["iPad7,6"] = new("iPad (6th gen)", Family.IPad),
+        ["iPad7,11"] = new("iPad (7th gen)", Family.IPad),
+        ["iPad7,12"] = new("iPad (7th gen)", Family.IPad),
+        ["iPad11,6"] = new("iPad (8th gen)", Family.IPad),
+        ["iPad11,7"] = new("iPad (8th gen)", Family.IPad),
+        ["iPad12,1"] = new("iPad (9th gen)", Family.IPad),
+        ["iPad12,2"] = new("iPad (9th gen)", Family.IPad),
+        ["iPad13,18"] = new("iPad (10th gen)", Family.IPad),
+        ["iPad13,19"] = new("iPad (10th gen)", Family.IPad),
+        ["iPad15,7"] = new("iPad (A16)", Family.IPad),
+        ["iPad15,8"] = new("iPad (A16)", Family.IPad),
+        ["iPad11,1"] = new("iPad mini (5th gen)", Family.IPad),
+        ["iPad11,2"] = new("iPad mini (5th gen)", Family.IPad),
+        ["iPad14,1"] = new("iPad mini (6th gen)", Family.IPad),
+        ["iPad14,2"] = new("iPad mini (6th gen)", Family.IPad),
+        ["iPad16,1"] = new("iPad mini (A17 Pro)", Family.IPad),
+        ["iPad16,2"] = new("iPad mini (A17 Pro)", Family.IPad),
+        ["iPad11,3"] = new("iPad Air (3rd gen)", Family.IPad),
+        ["iPad11,4"] = new("iPad Air (3rd gen)", Family.IPad),
+        ["iPad13,1"] = new("iPad Air (4th gen)", Family.IPad),
+        ["iPad13,2"] = new("iPad Air (4th gen)", Family.IPad),
+        ["iPad13,16"] = new("iPad Air (5th gen)", Family.IPad),
+        ["iPad13,17"] = new("iPad Air (5th gen)", Family.IPad),
+        ["iPad14,8"] = new("iPad Air 11-inch (M2)", Family.IPad),
+        ["iPad14,9"] = new("iPad Air 11-inch (M2)", Family.IPad),
+        ["iPad14,10"] = new("iPad Air 13-inch (M2)", Family.IPad),
+        ["iPad14,11"] = new("iPad Air 13-inch (M2)", Family.IPad),
+        ["iPad8,1"] = new("iPad Pro 11-inch (1st gen)", Family.IPad),
+        ["iPad8,2"] = new("iPad Pro 11-inch (1st gen)", Family.IPad),
+        ["iPad8,3"] = new("iPad Pro 11-inch (1st gen)", Family.IPad),
+        ["iPad8,4"] = new("iPad Pro 11-inch (1st gen)", Family.IPad),
+        ["iPad8,5"] = new("iPad Pro 12.9-inch (3rd gen)", Family.IPad),
+        ["iPad8,6"] = new("iPad Pro 12.9-inch (3rd gen)", Family.IPad),
+        ["iPad8,7"] = new("iPad Pro 12.9-inch (3rd gen)", Family.IPad),
+        ["iPad8,8"] = new("iPad Pro 12.9-inch (3rd gen)", Family.IPad),
+        ["iPad8,9"] = new("iPad Pro 11-inch (2nd gen)", Family.IPad),
+        ["iPad8,10"] = new("iPad Pro 11-inch (2nd gen)", Family.IPad),
+        ["iPad8,11"] = new("iPad Pro 12.9-inch (4th gen)", Family.IPad),
+        ["iPad8,12"] = new("iPad Pro 12.9-inch (4th gen)", Family.IPad),
+        ["iPad13,4"] = new("iPad Pro 11-inch (3rd gen)", Family.IPad),
+        ["iPad13,5"] = new("iPad Pro 11-inch (3rd gen)", Family.IPad),
+        ["iPad13,6"] = new("iPad Pro 11-inch (3rd gen)", Family.IPad),
+        ["iPad13,7"] = new("iPad Pro 11-inch (3rd gen)", Family.IPad),
+        ["iPad13,8"] = new("iPad Pro 12.9-inch (5th gen)", Family.IPad),
+        ["iPad13,9"] = new("iPad Pro 12.9-inch (5th gen)", Family.IPad),
+        ["iPad13,10"] = new("iPad Pro 12.9-inch (5th gen)", Family.IPad),
+        ["iPad13,11"] = new("iPad Pro 12.9-inch (5th gen)", Family.IPad),
+        ["iPad14,3"] = new("iPad Pro 11-inch (4th gen)", Family.IPad),
+        ["iPad14,4"] = new("iPad Pro 11-inch (4th gen)", Family.IPad),
+        ["iPad14,5"] = new("iPad Pro 12.9-inch (6th gen)", Family.IPad),
+        ["iPad14,6"] = new("iPad Pro 12.9-inch (6th gen)", Family.IPad),
+        ["iPad16,3"] = new("iPad Pro 11-inch (M4)", Family.IPad),
+        ["iPad16,4"] = new("iPad Pro 11-inch (M4)", Family.IPad),
+        ["iPad16,5"] = new("iPad Pro 13-inch (M4)", Family.IPad),
+        ["iPad16,6"] = new("iPad Pro 13-inch (M4)", Family.IPad),
     };
 
     /// <summary>رمز البوردة (يظهر في مسارات SMC مثل target/d94/target.cpp) ← رمز الموديل</summary>
@@ -80,7 +137,7 @@ public static class AppleDevices
     static readonly Dictionary<string, string> Socs = new(StringComparer.OrdinalIgnoreCase)
     {
         ["T8010"] = "A10 Fusion", ["T8015"] = "A11 Bionic", ["T8020"] = "A12 Bionic", ["T8030"] = "A13 Bionic",
-        ["T8101"] = "A14 Bionic", ["T8110"] = "A15 Bionic", ["T8120"] = "A16 Bionic", ["T8130"] = "A17 Pro", ["T8140"] = "A18 / A18 Pro",
+        ["T8101"] = "A14 Bionic", ["T8110"] = "A15 Bionic", ["T8120"] = "A16 Bionic", ["T8130"] = "A17 Pro", ["T8140"] = "A18 / A18 Pro", ["T8027"] = "A12X / A12Z Bionic", ["T8103"] = "M1",
     };
 
     static readonly Regex BoardInText = new(@"target[\\/]+([dn]\d{2,3}[a-z]?)[\\/]", RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -113,4 +170,9 @@ public static class AppleDevices
     public static string SocName(string code) => !string.IsNullOrEmpty(code) && Socs.TryGetValue(code, out var n) ? n : "";
 
     public static bool IsKnown(string product) => Find(product) != null;
+
+    public static bool IsIPad(string product) => Find(product)?.Family == Family.IPad || (product ?? "").StartsWith("iPad", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>كل الموديلات المعروفة (للاختيار في دليل الرموز)</summary>
+    public static IEnumerable<(string Product, Model Model)> All => Products.Select(p => (p.Key, p.Value));
 }
