@@ -3,9 +3,10 @@ using System.Data;
 namespace Kashif;
 
 /// <summary>
-/// تحليل البانك — الشاشة الرئيسية للبرنامج (F2). لوحة من ثلاثة أعمدة بلا تبويبات (الواجهة 6):
-/// العمود الأول: الخلاصة ثم الأسباب مرتبة. العمود الأوسط: خريطة الجهاز (أماكن القطع ملوّنة حسب الترتيب).
-/// العمود الأخير: الفحص التفاعلي (أسئلة عن اختبارات عملية تعيد ترتيب الأسباب)، ثم خطوات الفحص والأدلة من السجل (النقر على الدليل يفتح نص السجل مظللًا عند مكانه).
+/// تحليل البانك — الشاشة الرئيسية للبرنامج (F2)، بتصميم الواجهة 6 «أين العطل داخل الجهاز؟»:
+/// يمين: الجهاز والتشخيص، ثم أزرار الأسباب مرتبة. يسار: مخطط الجهاز تُلوَّن فيه أماكن القطع المشتبه بها.
+/// النقر على سبب أو قطعة (أو زر «الفحص والخطوات») يفتح نافذة فيها دليل القطعة، الخلاصة، ما حدث للجهاز،
+/// سؤال الفحص التفاعلي، خطوات الفحص، والأدلة من السجل (النقر على الدليل يفتح نص السجل مظللًا عند مكانه).
 /// قائمة السجلات جانبية تُطوى، وبقية التفاصيل (نص السجل، الزبون، التقرير، الخط الزمني، الفحوصات السابقة) في نوافذ عند الطلب.
 /// </summary>
 public class AnalyzeForm : BaseForm
@@ -20,14 +21,18 @@ public class AnalyzeForm : BaseForm
     readonly Toggle tAllEvidence = new() { Text = "كل التفاصيل", Width = 130 };
 
     readonly VerdictHero verdict = new() { Dock = DockStyle.Top, Height = 204, ShowTopCauses = false };
-    readonly InterviewView interview = new() { Dock = DockStyle.Top, Height = 200 };
-    readonly CardStack causes = new() { Dock = DockStyle.Fill, Padding = new Padding(2), EmptyText = "لا توجد أسباب — افتح سجل بانك" };
+    readonly InterviewView interview = new() { Dock = DockStyle.Fill };
+    readonly CardStack causes = new() { Dock = DockStyle.Fill, BackColor = Palette6.Ground, EmptyText = "لا توجد أسباب — افتح سجل بانك" };
     readonly DeviceMap map = new() { Dock = DockStyle.Fill };
+    readonly Label deviceLine = new() { Dock = DockStyle.Top, Height = 28, AutoSize = false, Font = Theme.F(11), ForeColor = Palette6.Muted, TextAlign = ContentAlignment.MiddleLeft };
+    readonly Label heading = new() { Dock = DockStyle.Top, Height = 60, AutoSize = false, Text = "أين العطل داخل الجهاز؟", Font = Theme.F(21, FontStyle.Bold), ForeColor = Palette6.Ink, TextAlign = ContentAlignment.MiddleLeft };
+    readonly Label hint = new() { Dock = DockStyle.Top, Height = 58, AutoSize = false, Font = Theme.F(11.5f), ForeColor = Palette6.Muted, TextAlign = ContentAlignment.TopLeft };
+    readonly FlowLayoutPanel flags = new() { Dock = DockStyle.Top, Height = 46, BackColor = Theme.Surface, WrapContents = false, Padding = new Padding(4, 5, 4, 0) };
+    readonly TableLayoutPanel lists = new() { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = Theme.Surface, Margin = new Padding(0) };
     readonly CardStack steps = new() { Dock = DockStyle.Fill, Padding = new Padding(2), EmptyText = "لا توجد خطوات" };
     readonly CardStack evidence = new() { Dock = DockStyle.Fill, Padding = new Padding(2), EmptyText = "لا توجد أدلة" };
-    readonly CardPanel logsCard, causesCard, mapCard, stepsCard, evidenceCard;
-    readonly Panel main, side;
-    readonly ModernButton bOpen, bPaste, bRaw, bClear, bCustomer, bSave, bReport, bMore, bLogs, bRemove;
+    readonly CardPanel logsCard, stepsCard, evidenceCard;
+    readonly ModernButton bOpen, bPaste, bExam, bRaw, bClear, bCustomer, bSave, bReport, bMore, bLogs, bRemove;
     readonly ContextMenuStrip moreMenu = new() { RightToLeft = RightToLeft.Yes, ShowImageMargin = false };
 
     // ---------- حالة الفحص ----------
@@ -40,7 +45,7 @@ public class AnalyzeForm : BaseForm
     Diagnosis shown;
     List<PanicLog> shownLogs = new();
     long recordId;
-    bool dirty, loading, busy, logsToggledByUser;
+    bool dirty, loading, busy, logsToggledByUser, detailsScaled;
 
     // ---------- فتح الشاشة من أماكن أخرى ----------
     public static void OpenRecord(long id)
@@ -81,6 +86,7 @@ public class AnalyzeForm : BaseForm
         var bar = Theme.Bar();
         bOpen = Theme.Btn("فتح ملفات", Theme.Brand, 130, "folder-open");
         bPaste = Theme.Btn("لصق", Theme.Brand, 90, "clipboard-list");
+        bExam = Theme.Btn("الفحص والخطوات", Theme.Brand, 170, "list-checks");
         bRaw = Theme.Btn("نص السجل", Theme.Gray, 120, "scroll-text");
         bClear = Theme.Btn("فحص جديد", Theme.Gray, 120, "plus");
         bCustomer = Theme.Btn("الزبون والنتيجة", Theme.Gray, 150, "user");
@@ -89,7 +95,7 @@ public class AnalyzeForm : BaseForm
         bMore = Theme.Btn("المزيد", Theme.Gray, 100, "ellipsis");
         bLogs = Theme.Btn("السجلات", Theme.Gray, 110, "panel-right");
         tCombine.Margin = new Padding(12, 8, 6, 2);
-        bar.Controls.AddRange(new Control[] { bOpen, bPaste, bRaw, bClear, tCombine, bCustomer, bSave, bReport, bMore, bLogs });
+        bar.Controls.AddRange(new Control[] { bOpen, bPaste, bExam, bRaw, bClear, tCombine, bCustomer, bSave, bReport, bMore, bLogs });
         foreach (var b in bar.Controls.OfType<ModernButton>()) { b.Height = 40; b.Margin = new Padding(4, 3, 4, 3); }
         moreMenu.Font = Theme.F(10.5f);
         moreMenu.Items.Add("الخط الزمني للسجلات", null, (s, e) => ShowTimeline());
@@ -101,7 +107,7 @@ public class AnalyzeForm : BaseForm
         moreMenu.Items.Add("نسخ تقرير الفني", null, (s, e) => CopyReport(false));
 
         // ---------- ما حدث للجهاز ----------
-        var flags = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 46, BackColor = Theme.Bg, WrapContents = false, Padding = new Padding(4, 5, 4, 0) };
+        // (في نافذة «الفحص والخطوات» مع سؤال الفحص — كلاهما يعيد ترتيب الأسباب)
         flags.Controls.Add(new Label { Text = "ما حدث للجهاز:", AutoSize = false, Width = 130, Height = 34, Font = Theme.FS(10), ForeColor = Theme.Text2, TextAlign = ContentAlignment.MiddleLeft });
         foreach (var t in new[] { tLiquid, tBattery, tFlex, tScreen, tDrop }) { t.Margin = new Padding(6, 0, 14, 0); flags.Controls.Add(t); }
 
@@ -121,20 +127,27 @@ public class AnalyzeForm : BaseForm
             if (logsGrid.Columns.Contains("السجل")) { logsGrid.Columns["السجل"].FillWeight = 86; logsGrid.Columns["السجل"].MinimumWidth = Dpi.S(120); }
         };
 
-        // ---------- ثلاثة أعمدة (الواجهة 6): الأسباب | خريطة الجهاز | الفحص والخطوات والأدلة ----------
-        // العمود الأول: الخلاصة ثم الأسباب مرتبة
-        causesCard = new CardPanel { Dock = DockStyle.Fill, Title = "الأسباب مرتبة", IconName = "list-ordered", Subtitle = "انقر على السبب لترى مكانه في الخريطة" };
-        causesCard.Controls.Add(causes);
-        main = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Margin = new Padding(14, 0, 0, 0) };
-        main.Controls.Add(causesCard);
-        main.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 12, BackColor = Theme.Bg });
-        main.Controls.Add(verdict);
+        // ---------- الواجهة 6: «أين العطل داخل الجهاز؟» ----------
+        // يمين: سطر الجهاز، العنوان، الإرشاد، ثم أزرار الأسباب. يسار: مخطط الجهاز بطول الشاشة.
+        // النقر على سبب أو قطعة يفتح «الفحص والخطوات»: دليلها، الخلاصة، ما حدث للجهاز، سؤال الفحص، الخطوات، الأدلة.
+        var main = new Panel { Dock = DockStyle.Fill, BackColor = Palette6.Ground, Margin = new Padding(0) };
+        main.Controls.Add(causes);
+        main.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 14, BackColor = Palette6.Ground });
+        main.Controls.Add(hint);
+        main.Controls.Add(heading);
+        main.Controls.Add(deviceLine);
 
-        // العمود الأوسط: خريطة الجهاز بطول الشاشة
-        mapCard = new CardPanel { Dock = DockStyle.Fill, Title = "أين العطل داخل الجهاز؟", IconName = "smartphone", Subtitle = "الأغمق = الأرجح · انقر على قطعة", Margin = new Padding(14, 0, 0, 0) };
-        mapCard.Controls.Add(map);
+        var columns = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = Palette6.Ground };
+        columns.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 44));
+        columns.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 56));
+        map.Margin = new Padding(28, 0, 0, 0);
+        columns.Controls.Add(main, 0, 0);
+        columns.Controls.Add(map, 1, 0);
 
-        // العمود الأخير: سؤال الفحص التفاعلي، ثم الخطوات والأدلة
+        var page = new Panel { Dock = DockStyle.Fill, BackColor = Palette6.Ground, Padding = new Padding(40, 28, 40, 20) };
+        page.Controls.Add(columns);
+
+        // خطوات الفحص والأدلة (تُعرض في نافذة «الفحص والخطوات»)
         stepsCard = new CardPanel { Dock = DockStyle.Fill, Title = "خطوات الفحص", IconName = "list-checks", Subtitle = "انقر على الخطوة عند إنجازها" };
         stepsCard.Controls.Add(steps);
         evidenceCard = new CardPanel { Dock = DockStyle.Fill, Title = "الأدلة من السجل", IconName = "search", Subtitle = "انقر على الدليل لترى مكانه في نص السجل" };
@@ -143,41 +156,25 @@ public class AnalyzeForm : BaseForm
         evTop.Controls.Add(tAllEvidence);
         evidenceCard.Controls.Add(evidence);
         evidenceCard.Controls.Add(evTop);
-        var lists = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = Theme.Bg, Margin = new Padding(0) };
         lists.RowStyles.Add(new RowStyle(SizeType.Percent, 55));
         lists.RowStyles.Add(new RowStyle(SizeType.Percent, 45));
         stepsCard.Margin = new Padding(0, 0, 0, 12);
         evidenceCard.Margin = new Padding(0);
         lists.Controls.Add(stepsCard, 0, 0);
         lists.Controls.Add(evidenceCard, 0, 1);
-        side = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Margin = new Padding(0) };
-        side.Controls.Add(lists);
-        side.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 12, BackColor = Theme.Bg });
-        side.Controls.Add(interview);
-        side.Resize += (s, e) => FitInterview();
 
-        var columns = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, BackColor = Theme.Bg };
-        columns.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 36));
-        columns.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 27));
-        columns.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 37));
-        columns.Controls.Add(main, 0, 0);
-        columns.Controls.Add(mapCard, 1, 0);
-        columns.Controls.Add(side, 2, 0);
-
-        var work = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
-        work.Controls.Add(columns);
-        work.Controls.Add(new Panel { Dock = DockStyle.Right, Width = 14, BackColor = Theme.Bg });
+        var work = new Panel { Dock = DockStyle.Fill, BackColor = Palette6.Ground };
+        work.Controls.Add(page);
         work.Controls.Add(logsCard);
 
         Controls.Add(work);
-        Controls.Add(new Panel { Dock = DockStyle.Top, Height = 6 });
-        Controls.Add(flags);
         Controls.Add(new Panel { Dock = DockStyle.Top, Height = 8 });
         Controls.Add(bar);
 
         // ---------- الأحداث ----------
         bOpen.Click += (s, e) => PickFiles();
         bPaste.Click += (s, e) => PasteClipboard();
+        bExam.Click += (s, e) => ShowDetails(null);
         bRaw.Click += (s, e) => ShowRaw(null);
         bClear.Click += (s, e) => ClearAll(ask: true);
         bCustomer.Click += (s, e) => EditCustomer();
@@ -208,18 +205,61 @@ public class AnalyzeForm : BaseForm
         bLogs.Invalidate();
     }
 
-    /// <summary>النقر على قطعة في خريطة الجهاز: تمرير قائمة الأسباب إلى بطاقتها</summary>
+    /// <summary>النقر على قطعة في خريطة الجهاز: تمرير قائمة الأسباب إلى زرها ثم فتح دليلها وخطوات الفحص</summary>
     void ShowCause(string part)
     {
-        if (causes.Controls.OfType<CauseCard>().FirstOrDefault(c => c.Part == part) is { } card) causes.ScrollControlIntoView(card);
+        if (causes.Controls.OfType<CauseButton>().FirstOrDefault(c => c.Part == part) is { } card) causes.ScrollControlIntoView(card);
+        ShowDetails(part);
     }
 
-    void FitInterview()
+    /// <summary>
+    /// «الفحص والخطوات»: دليل القطعة المختارة، الخلاصة، ما حدث للجهاز وسؤال الفحص التفاعلي (يمين)، وخطوات الفحص والأدلة (يسار).
+    /// نفس عناصر الشاشة تُنقل إلى النافذة ثم تُعاد بعد إغلاقها، فكل جواب يحدّث الأسباب والخريطة خلفها مباشرة.
+    /// </summary>
+    void ShowDetails(string part)
     {
-        int h = Math.Max(Dpi.S(120), interview.Measure(Math.Max(Dpi.S(200), side.ClientSize.Width)));
-        // لا يأخذ الفحص التفاعلي أكثر من نصف العمود حتى تبقى الخطوات ظاهرة
-        h = Math.Min(h, Math.Max(Dpi.S(160), side.ClientSize.Height / 2));
-        if (interview.Height != h) interview.Height = h;
+        if (shown == null) return;
+        var cause = part == null ? null : shown.Candidates.FirstOrDefault(c => c.Part == part);
+        using var dlg = new DialogShell(cause?.Part ?? "الفحص والخطوات", 1180, 800, "list-checks");
+        var grid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = Theme.Surface };
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 52));
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 48));
+        var right = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface, Margin = new Padding(0) };
+        grid.Controls.Add(right, 0, 0);
+
+        // العناصر المشتركة تُكبَّر حسب دقة العرض مرة واحدة فقط: في أول فتح تُضاف قبل تكبير النافذة فتُكبَّر معها،
+        // وبعدها تُضاف بعد التكبير (في Load) بمقاساتها الفعلية
+        void Attach(bool scaled)
+        {
+            int S(int v) => scaled ? Dpi.S(v) : v;
+            right.Controls.Add(interview);
+            right.Controls.Add(new Panel { Dock = DockStyle.Top, Height = S(10), BackColor = Theme.Surface });
+            right.Controls.Add(flags);
+            right.Controls.Add(new Panel { Dock = DockStyle.Top, Height = S(10), BackColor = Theme.Surface });
+            right.Controls.Add(verdict);
+            if (cause != null)
+            {
+                var why = $"{cause.Label} — {cause.Why}";
+                int h = TextRenderer.MeasureText(why, Theme.F(11), new Size(Dpi.S(500), int.MaxValue), TextFormatFlags.WordBreak).Height;
+                right.Controls.Add(new Label
+                {
+                    Dock = DockStyle.Top, AutoSize = false, Text = why, Font = Theme.F(11), ForeColor = Palette6.PetrolText, BackColor = Palette6.PetrolSoft,
+                    Padding = new Padding(S(12), S(8), S(12), S(8)), Height = (scaled ? h : Dpi.U(h)) + S(22), TextAlign = ContentAlignment.MiddleLeft,
+                });
+            }
+            lists.Margin = new Padding(S(14), 0, 0, 0);
+            grid.Controls.Add(lists, 1, 0);
+        }
+        if (!detailsScaled) { Attach(false); detailsScaled = true; }
+        else dlg.Load += (s, e) => Attach(true);
+        dlg.Body.Controls.Add(grid);
+        dlg.AddButton("إغلاق", DialogResult.Cancel, BtnKind.Secondary);
+        try { dlg.ShowModal(); }
+        finally
+        {
+            // إعادة العناصر المشتركة قبل إغلاق النافذة حتى لا تُتلف معها
+            foreach (var c in new Control[] { interview, flags, verdict, lists }) c.Parent?.Controls.Remove(c);
+        }
     }
 
     // ============================================================== الإدخال
@@ -457,6 +497,8 @@ public class AnalyzeForm : BaseForm
             verdict.Show(null, null);
             interview.Set(null, 0, Array.Empty<string>(), false);
             interview.Visible = false;
+            deviceLine.Text = "لم يُفتح سجل بعد";
+            hint.Text = "افتح ملف panic-full من «فتح ملفات» أو الصق نصه من «لصق» — أو اسحب الملف إلى هنا.";
             causes.SetItems(Array.Empty<StackItem>());
             map.Set(null);
             steps.SetItems(Array.Empty<StackItem>());
@@ -499,16 +541,17 @@ public class AnalyzeForm : BaseForm
         bool confirmed = shown.Summary.StartsWith("مؤكد بالفحص", StringComparison.Ordinal);
         interview.Set(next, remaining, answeredLines, confirmed);
         interview.Visible = shown.Candidates.Count > 0;
-        FitInterview();
+
+        deviceLine.Text = string.Join(" · ", new[] { shown.Device, shown.Title }.Where(x => !string.IsNullOrWhiteSpace(x)));
+        hint.Text = "اللون الأغمق = الأرجح. اضغط على أي قطعة لترى الدليل وخطوة فحصها.";
 
         causes.SetItems(shown.Candidates.Select((c, k) =>
         {
-            var card = new CauseCard(k + 1, c) { Cursor = Cursors.Hand };
-            card.Click += (o, e) => map.Select(card.Part);
+            var card = new CauseButton(k + 1, c);
+            card.Click += (o, e) => { map.Select(card.Part); ShowDetails(card.Part); };
             return (StackItem)card;
         }));
         map.Set(shown);
-        causesCard.Subtitle = shown.AnswersApplied > 0 ? $"مرتبة بعد {shown.AnswersApplied} من أجوبة الفحص" : "انقر على السبب لترى مكانه في الخريطة";
         steps.SetItems(shown.Steps.Select((s, k) =>
         {
             var card = new StepCard(k + 1, s, doneSteps.Contains(s));
@@ -563,7 +606,7 @@ public class AnalyzeForm : BaseForm
     {
         foreach (var b in new[] { bOpen, bPaste, bRaw, bClear }) b.Enabled = !busy;
         bSave.Enabled = !busy && shown != null && Session.Can("history");
-        bReport.Enabled = bCustomer.Enabled = bMore.Enabled = shown != null;
+        bReport.Enabled = bCustomer.Enabled = bMore.Enabled = bExam.Enabled = shown != null;
         bRemove.Enabled = !busy && logs.Count > 0;
         bSave.Text = recordId > 0 ? "تحديث السجل" : "حفظ في السجل";
         bSave.Invalidate();

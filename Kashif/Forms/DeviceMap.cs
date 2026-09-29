@@ -1,33 +1,118 @@
 namespace Kashif;
 
+// الواجهة 6 «أين العطل داخل الجهاز؟»: أزرار الأسباب بجانب مخطط آيفون تُلوَّن فيه أماكن القطع المشتبه بها.
+// الألوان والمقاسات مأخوذة من التصميم المعتمد (بكسل التصميم × دقة العرض).
+
+/// <summary>ألوان الواجهة 6</summary>
+public static class Palette6
+{
+    static Color C(string hex) => ColorTranslator.FromHtml(hex);
+    public static readonly Color Ground = C("#F5F2EC"), Card = Color.White, Ink = C("#1B1A17"), Muted = C("#5F5B53"),
+        Line = C("#E4DED3"), Screen = C("#FBF9F5"), ScreenLine = C("#D8D1C4"),
+        Petrol = C("#0E5A55"), PetrolText = C("#0B4A46"), PetrolSoft = C("#E3EFEC"),
+        Mid = C("#3F7F7A"), MidSoft = C("#CFE2DF"), Light = C("#8FB3AF"), LightText = C("#3F5F5C"),
+        Warn = C("#8A3F0C"), WarnLine = C("#D8C3B0"), Unlikely = C("#F1EEE8"), UnlikelyLine = C("#C9C2B5");
+
+    /// <summary>سبب مستبعد: لا يُرقَّم ويُرسم متقطعًا</summary>
+    public static bool IsUnlikely(Candidate c) => c.Label == "احتمال بعيد";
+
+    /// <summary>سطر السبب الثاني: الدرجة ثم أول جملة من السبب (أو تحذير صريح للسبب المستبعد)</summary>
+    public static string SubLine(Candidate c)
+    {
+        if (IsUnlikely(c))
+            return (c.Why ?? "").Contains("لا دليل") ? "لا دليل في السجل — لا تبدّلها" : "احتمال بعيد — افحص ما فوقه أولًا";
+        var why = (c.Why ?? "").Split(new[] { " — ", "؛", "\n" }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim() ?? "";
+        if (why.Length > 70) why = why[..70].TrimEnd() + "…";
+        return why == "" ? c.Label : $"{c.Label} · {why}";
+    }
+}
+
+/// <summary>زر سبب في الواجهة 6: «1 · القطعة» وتحته الدرجة وسبب مختصر. الأول بإطار بترولي، المستبعد بإطار متقطع.</summary>
+public class CauseButton : StackItem
+{
+    readonly int rank;
+    readonly Candidate c;
+    bool hover;
+
+    public CauseButton(int rank, Candidate c)
+    {
+        this.rank = rank;
+        this.c = c;
+        Cursor = Cursors.Hand;
+    }
+
+    public string Part => c.Part;
+
+    static int S(int v) => Dpi.S(v);
+    bool First => rank == 1 && !Palette6.IsUnlikely(c);
+    string Title => Palette6.IsUnlikely(c) ? c.Part : $"{rank} · {c.Part}";
+    Font TitleFont => First ? Theme.F(13.5f, FontStyle.Bold) : Theme.FS(12.5f);
+    static Font SubFont => Theme.F(10.5f);
+    int Inner(int width) => width - 2 * S(20);
+
+    public override int Measure(int width) =>
+        S(First ? 18 : 16) * 2 + TextHeight(Title, TitleFont, Inner(width)) + S(6) + TextHeight(Palette6.SubLine(c), SubFont, Inner(width));
+
+    protected override void OnMouseEnter(EventArgs e) { hover = true; Invalidate(); base.OnMouseEnter(e); }
+    protected override void OnMouseLeave(EventArgs e) { hover = false; Invalidate(); base.OnMouseLeave(e); }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.Clear(Gfx.OpaqueBack(this));
+        Gfx.Hq(g);
+        bool unlikely = Palette6.IsUnlikely(c);
+        float bw = First ? S(2) : Math.Max(1, S(1));
+        var r = new RectangleF(bw / 2f, bw / 2f, Width - bw - 1, Height - bw - 1);
+        Gfx.FillRound(g, r, S(16), hover ? Gfx.Mix(Palette6.Card, Palette6.Ground, 0.6f) : Palette6.Card);
+        using (var p = new Pen(First ? Palette6.Petrol : unlikely ? Palette6.WarnLine : Palette6.Line, bw))
+        using (var path = Gfx.Round(r, S(16)))
+        {
+            if (unlikely) p.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
+            g.DrawPath(p, path);
+        }
+        int pad = S(First ? 18 : 16), w = Inner(Width);
+        int th = TextHeight(Title, TitleFont, w);
+        TextRenderer.DrawText(g, Title, TitleFont, new Rectangle(S(20), pad, w, th), Palette6.Ink, Wrap);
+        var sub = Palette6.SubLine(c);
+        TextRenderer.DrawText(g, sub, SubFont, new Rectangle(S(20), pad + th + S(6), w, TextHeight(sub, SubFont, w)),
+            First ? Palette6.PetrolText : unlikely ? Palette6.Warn : Palette6.Muted, Wrap);
+    }
+}
+
 /// <summary>
-/// خريطة الجهاز: مخطط آيفون من الداخل تُلوَّن فيه أماكن القطع حسب ترتيب الأسباب (الأغمق = الأرجح)،
-/// وعلى كل مكان رقم السبب في القائمة. البطارية بلا دليل تُرسم متقطعة ورمادية حتى لا تُبدَّل بلا سبب.
-/// الأسباب التي ليس لها مكان على المخطط (برمجي، سوائل، آخر قطعة، ملحق) تُكتب تحت الجهاز.
+/// مخطط آيفون من الداخل (بإحداثيات تصميم 360×700): لا تُرسم إلا أماكن القطع التي بين الأسباب،
+/// ملوّنة حسب ترتيبها ومكتوب عليها اسمها. المستبعد رمادي متقطع مع «لا دليل». النقر على مكان يفتح دليله وخطوات فحصه.
 /// </summary>
 public class DeviceMap : Control
 {
-    /// <summary>مكان على المخطط بإحداثيات نسبية (0–1) داخل هيكل الجهاز، والقطع التي يمثلها</summary>
-    sealed record Zone(string Name, RectangleF Box, bool Round, params string[] Parts);
+    enum Shape { Rect, Circle, Notch }
 
+    /// <summary>مكان على المخطط: مستطيله في إحداثيات التصميم، ومكان اسمه (أو في وسطه إن اتسع)، والقطع التي يمثلها</summary>
+    sealed record Zone(string Name, RectangleF Box, Shape Shape, PointF? LabelAt, float FontPx, string[] Parts);
+
+    static Zone Z(string name, float x, float y, float w, float h, Shape shape, PointF? label, float font, params string[] parts) =>
+        new(name, new RectangleF(x, y, w, h), shape, label, font, parts);
+
+    // مرتبة من الأكبر إلى الأصغر: الصغير يُرسم فوق الكبير ويُلتقط أولًا بالنقر
     static readonly Zone[] Zones =
     {
-        new("الكاميرا الخلفية", new(0.10f, 0.05f, 0.30f, 0.15f), false, Parts.Camera),
-        new("البوردة", new(0.46f, 0.05f, 0.44f, 0.20f), false,
+        Z("البطارية", 70, 170, 168, 330, Shape.Rect, null, 16, Parts.Battery),
+        Z("البوردة", 250, 120, 60, 420, Shape.Rect, new PointF(280, 560), 14,
             Parts.Board, Parts.SmcLine, Parts.Pmu, Parts.SocRam, Parts.Nand, Parts.Wifi, Parts.Baseband, Parts.AudioIc, Parts.ChargeIc, Parts.Sensors),
-        new("فلاتة الكاميرا الأمامية والحساسات", new(0.30f, 0.012f, 0.40f, 0.03f), false, Parts.FrontFlex),
-        new("Face ID", new(0.14f, 0.012f, 0.13f, 0.03f), false, Parts.Biometric),
-        new("زر التشغيل", new(0.93f, 0.16f, 0.05f, 0.16f), false, Parts.PowerFlex),
-        new("موصل البطارية", new(0.56f, 0.27f, 0.22f, 0.035f), false, Parts.BatteryConn),
-        new("البطارية", new(0.14f, 0.32f, 0.72f, 0.44f), false, Parts.Battery),
-        new("زر البصمة", new(0.42f, 0.78f, 0.16f, 0.07f), true, Parts.TouchId),
-        new("السماعة والميكروفون", new(0.10f, 0.865f, 0.22f, 0.05f), false, Parts.AudioParts),
-        new("فلاتة الشحن", new(0.36f, 0.865f, 0.54f, 0.05f), false, Parts.ChargingFlex),
+        Z("فلاتة الشحن", 90, 600, 180, 46, Shape.Rect, null, 15, Parts.ChargingFlex),
+        Z("الكاميرا", 56, 118, 84, 40, Shape.Rect, null, 13, Parts.Camera),
+        Z("موصل البطارية", 144, 136, 94, 26, Shape.Rect, null, 12, Parts.BatteryConn),
+        Z("السماعة", 46, 600, 36, 46, Shape.Rect, new PointF(64, 662), 12, Parts.AudioParts),
+        Z("زر التشغيل", 334, 170, 12, 90, Shape.Rect, null, 12, Parts.PowerFlex),
+        Z("البصمة", 160, 540, 40, 40, Shape.Circle, null, 12, Parts.TouchId),
+        Z("Face ID", 58, 40, 52, 30, Shape.Rect, new PointF(84, 92), 12, Parts.Biometric),
+        Z("حساس القرب والإضاءة", 120, 33, 154, 44, Shape.Notch, new PointF(180, 110), 16, Parts.FrontFlex),
     };
 
     readonly ToolTip tip = new() { InitialDelay = 250, ReshowDelay = 100, AutoPopDelay = 15000 };
     List<Candidate> candidates = new();
-    readonly List<(Zone Zone, RectangleF Rect, int Rank, Candidate Cause)> drawn = new();
+    readonly List<(Zone Zone, RectangleF Rect, Candidate Cause)> drawn = new();
     Zone hover;
     string selected;
 
@@ -37,7 +122,7 @@ public class DeviceMap : Control
     public DeviceMap()
     {
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-        BackColor = Theme.Surface;
+        BackColor = Palette6.Ground;
     }
 
     public void Set(Diagnosis d)
@@ -56,117 +141,119 @@ public class DeviceMap : Control
         Invalidate();
     }
 
-    static int S(int v) => Dpi.S(v);
-
     int RankOf(string part) => candidates.FindIndex(c => c.Part == part) + 1;
 
-    /// <summary>أفضل سبب في المكان (أقل رقم ترتيب)، أو لا شيء إن لم تكن أي قطعة منه ضمن الأسباب</summary>
     (int Rank, Candidate Cause) Best(Zone z) =>
-        z.Parts.Select(p => (Rank: RankOf(p), Part: p)).Where(x => x.Rank > 0).OrderBy(x => x.Rank)
-            .Select(x => (x.Rank, candidates[x.Rank - 1])).FirstOrDefault();
+        z.Parts.Select(p => RankOf(p)).Where(r => r > 0).OrderBy(r => r).Select(r => (r, candidates[r - 1])).FirstOrDefault();
 
-    static bool Unlikely(Candidate c) => c.Label == "احتمال بعيد";
-
-    static (Color Fg, Color Bg) Colors(Candidate c)
+    /// <summary>ألوان المكان حسب ترتيبه: الأول بترولي غامق، الثاني والثالث متوسط، البقية فاتح، والمستبعد رمادي متقطع</summary>
+    static (Color Fill, Color Stroke, Color Text, bool Dashed) Style(int rank, Candidate c)
     {
-        var (fg, bg) = Theme.StatusColors(c.Label);
-        return fg == Color.Empty || Unlikely(c) ? (Theme.Muted, Theme.GraySoft) : (fg, bg);
+        if (Palette6.IsUnlikely(c)) return (Palette6.Unlikely, Palette6.UnlikelyLine, Palette6.Warn, true);
+        if (rank == 1) return (Palette6.PetrolSoft, Palette6.Petrol, Palette6.PetrolText, false);
+        if (rank <= 3) return (Palette6.MidSoft, Palette6.Mid, Palette6.PetrolText, false);
+        return (Palette6.PetrolSoft, Palette6.Light, Palette6.LightText, false);
     }
-
-    List<(int Rank, Candidate Cause)> Unmapped() => candidates
-        .Select((c, i) => (Rank: i + 1, Cause: c))
-        .Where(x => x.Cause.Part != Parts.Screen && !Zones.Any(z => z.Parts.Contains(x.Cause.Part)))
-        .Take(4).ToList();
 
     protected override void OnPaint(PaintEventArgs e)
     {
         var g = e.Graphics;
-        g.Clear(Gfx.OpaqueBack(this));
+        g.Clear(BackColor);
         Gfx.Hq(g);
         drawn.Clear();
 
-        var extra = Unmapped();
-        int legendH = extra.Count * S(28) + (candidates.Count > 0 ? S(26) : 0);
-        var area = new RectangleF(S(8), S(6), Width - S(16), Height - S(12) - legendH);
-        // هيكل الجهاز بنسبة آيفون (العرض ≈ 0.48 من الطول)
-        float h = Math.Min(area.Height, area.Width / 0.48f), w = h * 0.48f;
-        if (w < S(60)) return;
-        var body = new RectangleF(area.X + (area.Width - w) / 2f, area.Y + (area.Height - h) / 2f, w, h);
-        Gfx.FillRound(g, body, w * 0.16f, Theme.Surface);
-        Gfx.DrawRound(g, body, w * 0.16f, Theme.Ink, S(2));
-        var inner = RectangleF.Inflate(body, -w * 0.05f, -w * 0.05f);
+        // مقياس التصميم (360×700) داخل المساحة المتاحة، في المنتصف
+        float k = Math.Min((Width - Dpi.S(8)) / 360f, (Height - Dpi.S(8)) / 700f);
+        if (k <= 0.1f) return;
+        float ox = (Width - 360 * k) / 2f, oy = (Height - 700 * k) / 2f;
+        RectangleF R(RectangleF b) => new(ox + b.X * k, oy + b.Y * k, b.Width * k, b.Height * k);
+        RectangleF Rc(float x, float y, float w, float h) => R(new RectangleF(x, y, w, h));
+        Font Px(float px, bool bold) => FontKit.GetPx(Math.Max(9f, px * k), bold ? FontStyle.Bold : FontStyle.Regular);
+        float Line(float w) => Math.Max(1.5f, w * k);
 
-        // الشاشة: إطار داخلي يتلوّن إن كانت الشاشة ضمن الأسباب
+        // الهيكل والشاشة
+        Gfx.FillRound(g, Rc(20, 10, 320, 680), 52 * k, Color.White);
+        Gfx.DrawRound(g, Rc(20, 10, 320, 680), 52 * k, Palette6.Ink, Line(3));
+        var inner = Rc(38, 28, 284, 644);
+        Gfx.FillRound(g, inner, 38 * k, Palette6.Screen);
         int screenRank = RankOf(Parts.Screen);
         if (screenRank > 0)
         {
-            var (fg, _) = Colors(candidates[screenRank - 1]);
-            using var p = new Pen(fg, S(3)) { DashStyle = Unlikely(candidates[screenRank - 1]) ? System.Drawing.Drawing2D.DashStyle.Dash : System.Drawing.Drawing2D.DashStyle.Solid };
-            using var path = Gfx.Round(inner, w * 0.12f);
-            g.DrawPath(p, path);
+            var (_, stroke, text, dashed) = Style(screenRank, candidates[screenRank - 1]);
+            using (var p = new Pen(stroke, Line(3)))
+            using (var path = Gfx.Round(inner, 38 * k))
+            {
+                if (dashed) p.DashPattern = new[] { 4f, 3f };
+                g.DrawPath(p, path);
+            }
+            DrawLabel(g, "الشاشة", Px(14, true), new PointF(ox + 180 * k, oy + 580 * k), text);
         }
-        else Gfx.DrawRound(g, inner, w * 0.12f, Theme.Border);
+        else Gfx.DrawRound(g, inner, 38 * k, Palette6.ScreenLine, Line(1.5f));
 
         foreach (var z in Zones)
         {
             var (rank, cause) = Best(z);
-            // زر البصمة لا يُرسم إلا إن كان ضمن الأسباب (غير موجود في معظم الموديلات)
-            if (cause == null && z.Parts.Contains(Parts.TouchId)) continue;
-            var r = new RectangleF(inner.X + z.Box.X * inner.Width, inner.Y + z.Box.Y * inner.Height, z.Box.Width * inner.Width, z.Box.Height * inner.Height);
-            drawn.Add((z, r, rank, cause));
-            float rad = z.Round ? Math.Min(r.Width, r.Height) / 2f : S(6);
-            bool hot = z == hover;
-            if (cause == null)
-            {
-                Gfx.FillRound(g, r, rad, hot ? Theme.GraySoft : Theme.SurfaceAlt);
-                Gfx.DrawRound(g, r, rad, Theme.BorderStrong);
-                continue;
-            }
-            var (fg, bg) = Colors(cause);
+            if (cause == null) continue;
+            var r = R(z.Box);
+            drawn.Add((z, r, cause));
+            var (fill, stroke, text, dashed) = Style(rank, cause);
+            bool top = rank == 1 && !dashed;
+            if (z == hover) fill = Gfx.Mix(fill, stroke, 0.2f);
+
             if (selected != null && z.Parts.Contains(selected))
-                Gfx.DrawRound(g, RectangleF.Inflate(r, S(4), S(4)), rad + S(4), Theme.Ink, S(2));
-            Gfx.FillRound(g, r, rad, hot ? Gfx.Mix(bg, fg, 0.18f) : bg);
-            using (var p = new Pen(fg, rank == 1 ? S(3) : S(2)))
-            using (var path = Gfx.Round(r, rad))
             {
-                if (Unlikely(cause)) p.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
+                var ring = RectangleF.Inflate(r, 6 * k, 6 * k);
+                if (z.Shape == Shape.Circle) using (var p = new Pen(Palette6.Ink, Line(2))) g.DrawEllipse(p, ring);
+                else Gfx.DrawRound(g, ring, 16 * k, Palette6.Ink, Line(2));
+            }
+
+            if (z.Shape == Shape.Notch)
+            {
+                // كما في التصميم: حبة الكاميرا الأمامية ممتلئة، ودائرة متقطعة لمكان الحساس بجانبها
+                var pill = Rc(120, 40, 120, 30);
+                Gfx.FillRound(g, pill, 15 * k, top ? Palette6.Petrol : fill);
+                if (!top) Gfx.DrawRound(g, pill, 15 * k, stroke, Line(2));
+                using var p = new Pen(top ? Palette6.Petrol : stroke, Line(3)) { DashPattern = new[] { 2f, 1.7f } };
+                g.DrawEllipse(p, Rc(228, 33, 44, 44));
+            }
+            else
+            {
+                float rad = z.Shape == Shape.Circle ? Math.Min(r.Width, r.Height) / 2f : (z.Box.Width > 100 ? 18 : 10) * k;
+                using var path = z.Shape == Shape.Circle ? Ellipse(r) : Gfx.Round(r, rad);
+                using var b = new SolidBrush(fill);
+                using var p = new Pen(stroke, Line(top ? 3 : 2));
+                if (dashed) p.DashPattern = new[] { 4f, 3f };
+                g.FillPath(b, path);
                 g.DrawPath(p, path);
             }
-            DrawRank(g, new PointF(r.X + r.Width / 2f, r.Y + r.Height / 2f), rank, fg);
-            // البطارية بلا دليل: تنبيه صريح داخلها
-            if (z.Parts.Contains(Parts.Battery) && Unlikely(cause) && r.Height > S(70))
-                TextRenderer.DrawText(g, "لا دليل — لا تبدّلها", Theme.FS(9), Rectangle.Round(new RectangleF(r.X, r.Y + r.Height / 2f + S(18), r.Width, S(24))), Theme.Muted, Gfx.Center);
-        }
 
-        // أسباب بلا مكان على المخطط
-        if (candidates.Count == 0) return;
-        float y = body.Bottom + S(8);
-        TextRenderer.DrawText(g, "الرقم = ترتيب السبب في القائمة", Theme.F(9), Rectangle.Round(new RectangleF(S(4), y, Width - S(8), S(22))), Theme.Muted, Gfx.Center);
-        y += S(26);
-        foreach (var (rank, cause) in extra)
-        {
-            var (fg, _) = Colors(cause);
-            float right = Width - S(8);
-            DrawRank(g, new PointF(right - S(12), y + S(12)), rank, fg);
-            TextRenderer.DrawText(g, Theme.Bidi(cause.Part), Theme.F(9.5f), Rectangle.Round(new RectangleF(S(4), y, right - S(32) - S(4), S(24))), Theme.Text2, Gfx.RtlStart);
-            y += S(28);
+            // الاسم: في مكانه المحدد، أو في وسط المكان إن اتسع له (الأماكن الضيقة تكتفي بالتلميح)
+            string name = z.Name + (dashed ? ((cause.Why ?? "").Contains("لا دليل") ? " — لا دليل" : " — مستبعد") : "");
+            var font = Px(z.FontPx, top);
+            if (z.LabelAt is PointF at) DrawLabel(g, name, font, new PointF(ox + at.X * k, oy + at.Y * k), text);
+            else if (TextRenderer.MeasureText(name, font).Width <= r.Width - 6 * k)
+                DrawLabel(g, name, font, new PointF(r.X + r.Width / 2f, r.Y + r.Height / 2f), text);
         }
     }
 
-    static void DrawRank(Graphics g, PointF c, int rank, Color fg)
+    static System.Drawing.Drawing2D.GraphicsPath Ellipse(RectangleF r)
     {
-        float d = S(24);
-        var circle = new RectangleF(c.X - d / 2f, c.Y - d / 2f, d, d);
-        using (var b = new SolidBrush(rank == 1 ? fg : Color.White)) g.FillEllipse(b, circle);
-        using (var p = new Pen(fg, S(2))) g.DrawEllipse(p, circle);
-        TextRenderer.DrawText(g, rank.ToString(), Theme.FS(9), Rectangle.Round(circle), rank == 1 ? Color.White : fg, Gfx.Center);
+        var p = new System.Drawing.Drawing2D.GraphicsPath();
+        p.AddEllipse(r);
+        return p;
     }
 
-    (Zone Zone, RectangleF Rect, int Rank, Candidate Cause) HitTest(Point p)
+    static void DrawLabel(Graphics g, string text, Font font, PointF center, Color color)
     {
-        // الأماكن الصغيرة فوق الكبيرة: يُبحث من آخر ما رُسم
+        var size = TextRenderer.MeasureText(text, font, Size.Empty, TextFormatFlags.NoPadding);
+        var box = new Rectangle((int)(center.X - size.Width / 2f) - 2, (int)(center.Y - size.Height / 2f), size.Width + 4, size.Height);
+        TextRenderer.DrawText(g, text, font, box, color, Gfx.Center);
+    }
+
+    (Zone Zone, RectangleF Rect, Candidate Cause) HitTest(Point p)
+    {
         for (int i = drawn.Count - 1; i >= 0; i--)
-            if (drawn[i].Rect.Contains(p)) return drawn[i];
+            if (RectangleF.Inflate(drawn[i].Rect, Dpi.S(4), Dpi.S(4)).Contains(p)) return drawn[i];
         return default;
     }
 
@@ -199,12 +286,8 @@ public class DeviceMap : Control
         PartClicked?.Invoke(hit.Cause.Part);
     }
 
-    string Describe(Zone z)
-    {
-        var lines = z.Parts.Select(p => (Rank: RankOf(p), Part: p)).Where(x => x.Rank > 0).OrderBy(x => x.Rank)
-            .Select(x => $"{x.Rank} · {x.Part} — {candidates[x.Rank - 1].Label}").ToList();
-        return lines.Count == 0 ? $"{z.Name}: لا دليل عليه في السجل" : string.Join("\n", lines);
-    }
+    string Describe(Zone z) => string.Join("\n", z.Parts.Select(p => RankOf(p)).Where(r => r > 0).OrderBy(r => r)
+        .Select(r => $"{r} · {candidates[r - 1].Part} — {candidates[r - 1].Label}"));
 
     protected override void Dispose(bool disposing)
     {
