@@ -59,7 +59,7 @@ public class MainForm : BaseForm
     readonly ScrollHost nav = new() { Dock = DockStyle.Fill, BackColor = Theme.Sidebar };
     readonly List<NavLabel> navLabels = new();
     readonly ToolTip navTip = new();
-    Panel logo;
+    Panel logo, credits;
     bool rail;
     readonly NotifyIcon tray = new() { Icon = SystemIcons.Application, Visible = true, Text = "كاشف" };
     readonly System.Windows.Forms.Timer timer = new() { Interval = 30_000 };
@@ -181,7 +181,27 @@ public class MainForm : BaseForm
             sections.Add((head, items));
         }
         nav.Add(new Panel { Height = 12, BackColor = Theme.Sidebar });
+
+        // ---------- الحقوق: أسفل القائمة (النقر يفتح «حول كاشف») ----------
+        credits = new Panel { Dock = DockStyle.Bottom, Height = 62, BackColor = Theme.Sidebar, Cursor = Cursors.Hand };
+        credits.Paint += (s, e) =>
+        {
+            var g = e.Graphics;
+            using (var pen = new Pen(Theme.SidebarBorder)) g.DrawLine(pen, Dpi.S(14), 0, credits.Width - Dpi.S(14), 0);
+            if (rail)
+            {
+                Icons.Draw(g, "info", new RectangleF((credits.Width - Dpi.S(24)) / 2f, (credits.Height - Dpi.S(24)) / 2f, Dpi.S(24), Dpi.S(24)), Theme.SidebarMuted, 18);
+                return;
+            }
+            int l = Dpi.S(12), w = credits.Width - Dpi.S(32);
+            TextRenderer.DrawText(g, Credits.Short, Theme.FS(9.5f), new Rectangle(l, Dpi.S(10), w, Dpi.S(22)), Theme.SidebarText, Gfx.RtlStart);
+            TextRenderer.DrawText(g, Credits.Contacts, Theme.F(8), new Rectangle(l, Dpi.S(32), w, Dpi.S(20)), Theme.SidebarMuted, Gfx.RtlStart);
+        };
+        credits.Click += (s, e) => Credits.ShowAbout();
+        navTip.SetToolTip(credits, Credits.Full.Replace("\n\n", "\n"));
+
         side.Controls.Add(nav);
+        side.Controls.Add(credits);
         side.Controls.Add(logo);
         // خط فاصل رفيع بين القائمة والمحتوى
         side.Controls.Add(new Panel { Dock = DockStyle.Left, Width = 1, BackColor = Theme.SidebarBorder });
@@ -301,6 +321,7 @@ public class MainForm : BaseForm
     void SetRail(bool on, bool save)
     {
         rail = on;
+        credits?.Invalidate();
         SuspendLayout();
         nav.SuspendContent();
         side.Width = Dpi.S(on ? SideRail : SideWide);

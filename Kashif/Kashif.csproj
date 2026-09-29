@@ -10,6 +10,9 @@
     <ApplicationHighDpiMode>SystemAware</ApplicationHighDpiMode>
     <Version>1.0.0</Version>
     <Product>كاشف</Product>
+    <Company>يوسف أحمد</Company>
+    <Authors>يوسف أحمد</Authors>
+    <Copyright>© يوسف أحمد — Telegram YsYsD · Instagram Gxp6 · 07764455011</Copyright>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.8" />
