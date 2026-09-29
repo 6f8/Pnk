@@ -1,5 +1,5 @@
 {
- "version": 5,
+ "version": 6,
  "_readme": "قاعدة معرفة كاشف. part = اسم ثابت من قائمة Parts في الكود. score من 1 إلى 99 للترتيب فقط. level: مؤكد/شائع/محتمل. families: X11 (iPhone X إلى 11) و Later (12 وما بعده) و Early (8 وما قبله و SE) و default. models: رمز موديل محدد (مثل iPhone13,2) يغلب على الجيل — لا تُضاف إلا معلومة مؤكدة. smcFailures: نص فشل SMC (مثل SMC BSC failure) ← القطع، حسب موديل محدد إن وُثّقت حالة مؤكدة، وإلا default بدرجة منخفضة. questions.cost: free (فحص أو فصل أو سؤال بلا شراء) أو part (يحتاج قطعة بديلة) — الأسئلة المجانية تُسأل أولًا.",
  "sensors": [
   {
@@ -141,7 +141,7 @@
    "code": "TG0B",
    "what": "حساس حرارة البطارية (TG0B)",
    "note": "جرّب بطارية سليمة معروفة؛ إن اختفى البانك فالبطارية هي السبب.",
-   "source": "قائمة الحساسات في سطر Missing sensor(s) + ما هو متكرر في ورش الصيانة",
+   "source": "قائمة الحساسات في سطر Missing sensor(s) + ما هو متكرر في ورش الصيانة + iFixit Wiki: iPhone Kernel Panics (ifixit.com/Wiki/iPhone_Kernel_Panics) + iFixit Answers: Missing Sensor(s): TG0B and TG0V",
    "level": "مؤكد",
    "families": {
     "default": [
@@ -161,13 +161,59 @@
       "why": "خط الحساس على البوردة"
      }
     ]
+   },
+   "models": {
+    "iPhone12,3": [
+     {
+      "part": "Battery",
+      "score": 80,
+      "why": "حساس الحرارة داخل البطارية: بطارية تالفة أو غير أصلية"
+     },
+     {
+      "part": "ChargingFlex",
+      "score": 62,
+      "why": "في iPhone 11 Pro و 11 Pro Max للبطارية موصل ثانٍ يمر عبر فلاتة الشحن، فقد يكون السبب فلاتة الشحن."
+     },
+     {
+      "part": "BatteryConn",
+      "score": 62,
+      "why": "الموصل غير محكم أو متأكسد"
+     },
+     {
+      "part": "Board",
+      "score": 30,
+      "why": "خط الحساس على البوردة"
+     }
+    ],
+    "iPhone12,5": [
+     {
+      "part": "Battery",
+      "score": 80,
+      "why": "حساس الحرارة داخل البطارية: بطارية تالفة أو غير أصلية"
+     },
+     {
+      "part": "ChargingFlex",
+      "score": 62,
+      "why": "في iPhone 11 Pro و 11 Pro Max للبطارية موصل ثانٍ يمر عبر فلاتة الشحن، فقد يكون السبب فلاتة الشحن."
+     },
+     {
+      "part": "BatteryConn",
+      "score": 62,
+      "why": "الموصل غير محكم أو متأكسد"
+     },
+     {
+      "part": "Board",
+      "score": 30,
+      "why": "خط الحساس على البوردة"
+     }
+    ]
    }
   },
   {
    "code": "TG0V",
    "what": "حساس حرارة مرتبط بالبطارية (TG0V)",
    "note": "جرّب بطارية سليمة معروفة وافحص الموصل.",
-   "source": "قائمة الحساسات في سطر Missing sensor(s) + ما هو متكرر في ورش الصيانة",
+   "source": "قائمة الحساسات في سطر Missing sensor(s) + ما هو متكرر في ورش الصيانة + iFixit Wiki: iPhone Kernel Panics (ifixit.com/Wiki/iPhone_Kernel_Panics) + iFixit Answers: Missing Sensor(s): TG0B and TG0V",
    "level": "شائع",
    "families": {
     "default": [
@@ -175,6 +221,52 @@
       "part": "Battery",
       "score": 75,
       "why": "حساس حرارة مرتبط بالبطارية"
+     },
+     {
+      "part": "BatteryConn",
+      "score": 62,
+      "why": "الموصل أو الفلاتة"
+     },
+     {
+      "part": "Board",
+      "score": 32,
+      "why": "خط الحساس على البوردة"
+     }
+    ]
+   },
+   "models": {
+    "iPhone12,3": [
+     {
+      "part": "Battery",
+      "score": 75,
+      "why": "حساس حرارة مرتبط بالبطارية"
+     },
+     {
+      "part": "ChargingFlex",
+      "score": 62,
+      "why": "في iPhone 11 Pro و 11 Pro Max للبطارية موصل ثانٍ يمر عبر فلاتة الشحن، فقد يكون السبب فلاتة الشحن."
+     },
+     {
+      "part": "BatteryConn",
+      "score": 62,
+      "why": "الموصل أو الفلاتة"
+     },
+     {
+      "part": "Board",
+      "score": 32,
+      "why": "خط الحساس على البوردة"
+     }
+    ],
+    "iPhone12,5": [
+     {
+      "part": "Battery",
+      "score": 75,
+      "why": "حساس حرارة مرتبط بالبطارية"
+     },
+     {
+      "part": "ChargingFlex",
+      "score": 62,
+      "why": "في iPhone 11 Pro و 11 Pro Max للبطارية موصل ثانٍ يمر عبر فلاتة الشحن، فقد يكون السبب فلاتة الشحن."
      },
      {
       "part": "BatteryConn",
@@ -476,6 +568,124 @@
   }
  ],
  "signatures": [
+  {
+   "kind": "AOP (صوت)",
+   "title": "انهيار AOP أثناء الصوت (Bosch control channel)",
+   "regex": "Bosch control channel write failure",
+   "explain": "يحدث غالبًا أثناء الصوت، مثل رفع الصوت إلى الأعلى. إشارة السماعة السفلية تمر عبر فلاتة الشحن، وتلفها هو السبب الأشيع.",
+   "confidence": "متوسطة",
+   "choices": [
+    {
+     "part": "ChargingFlex",
+     "score": 75,
+     "why": "فلاتة الشحن تحمل إشارة السماعة إلى البوردة — السبب الأشيع لهذا البانك"
+    },
+    {
+     "part": "Liquid",
+     "score": 40,
+     "why": "افحص آثار السوائل على الفلاتة وموصلها"
+    },
+    {
+     "part": "Board",
+     "score": 25,
+     "why": "إذا بقي مع فلاتة سليمة أصلية"
+    }
+   ],
+   "steps": [
+    "افحص فلاتة الشحن وموصلها بحثًا عن تأكسد أو سوائل.",
+    "جرّب فلاتة شحن سليمة أصلية أو مسحوبة من جهاز أصلي، ثم ارفع الصوت إلى الأعلى.",
+    "إذا بقي: فحص البوردة."
+   ],
+   "source": "iFixit Wiki: iPhone Kernel Panics (ifixit.com/Wiki/iPhone_Kernel_Panics)",
+   "level": "شائع"
+  },
+  {
+   "kind": "AOP NMI POWER",
+   "title": "انهيار AOP: NMI POWER",
+   "regex": "NMI\\s*POWER",
+   "explain": "إشارة مقاطعة من المعالج دائم التشغيل (AOP). ترتبط غالبًا بفلاتة زر التشغيل أو بفلاتة الكاميرا الأمامية.",
+   "confidence": "متوسطة",
+   "choices": [
+    {
+     "part": "PowerFlex",
+     "score": 62,
+     "why": "غالبًا فلاتة زر التشغيل"
+    },
+    {
+     "part": "FrontFlex",
+     "score": 55,
+     "why": "أو فلاتة الكاميرا الأمامية"
+    },
+    {
+     "part": "Board",
+     "score": 25,
+     "why": "إذا بقي مع فلاتات سليمة"
+    }
+   ],
+   "steps": [
+    "افصل فلاتة زر التشغيل وشغّل الجهاز: إن تغيّر شكل البانك فالسبب فيها.",
+    "افصل فلاتة الكاميرا الأمامية وجرّب.",
+    "استخدم قطعة أصلية أو مسحوبة: البدائل الرديئة تسبب نفس البانك."
+   ],
+   "source": "iFixit Wiki: iPhone Kernel Panics (ifixit.com/Wiki/iPhone_Kernel_Panics)",
+   "level": "شائع"
+  },
+  {
+   "kind": "SEP ROM",
+   "title": "انهيار SEP ROM",
+   "regex": "SEP\\s*ROM",
+   "explain": "شريحة ROM للمعالج الآمن أو خط اتصالها بالمعالج تالف.",
+   "confidence": "متوسطة",
+   "choices": [
+    {
+     "part": "Board",
+     "score": 65,
+     "why": "شريحة ROM أو خط اتصالها بالمعالج على البوردة"
+    },
+    {
+     "part": "Ios",
+     "score": 25,
+     "why": "جرّب إعادة تثبيت iOS عبر الكمبيوتر قبل فحص البوردة"
+    }
+   ],
+   "steps": [
+    "أعد تثبيت iOS عبر الكمبيوتر (مجاني).",
+    "إذا استمر: فحص البوردة (شريحة ROM للمعالج الآمن وخطها)."
+   ],
+   "source": "iFixit Wiki: iPhone Kernel Panics (ifixit.com/Wiki/iPhone_Kernel_Panics)",
+   "level": "شائع"
+  },
+  {
+   "kind": "AppleSocHot",
+   "title": "إنذار حرارة المعالج AppleSocHot",
+   "regex": "AppleSocHot",
+   "explain": "البانك مرتبط بخط كهربائي بين آيسي الطاقة والمعالج. غالبًا مشكلة بوردة وليست قطعة، ومن أسبابها الشائعة دوائر الواي فاي والصوت.",
+   "confidence": "منخفضة",
+   "choices": [
+    {
+     "part": "Board",
+     "score": 60,
+     "why": "خط بين آيسي الطاقة والمعالج — غالبًا البوردة وليس قطعة"
+    },
+    {
+     "part": "Pmu",
+     "score": 45,
+     "why": "آيسي الطاقة"
+    },
+    {
+     "part": "Ios",
+     "score": 25,
+     "why": "جرّب إعادة تثبيت iOS عبر الكمبيوتر أولًا"
+    }
+   ],
+   "steps": [
+    "أعد تثبيت iOS عبر الكمبيوتر (مجاني).",
+    "لا تبدّل قطعًا خارجية بناءً على هذا البانك وحده.",
+    "إذا استمر: فحص البوردة (خطوط آيسي الطاقة، دوائر الواي فاي والصوت)."
+   ],
+   "source": "iFixit Wiki: iPhone Kernel Panics (ifixit.com/Wiki/iPhone_Kernel_Panics)",
+   "level": "محتمل"
+  },
   {
    "kind": "AOP",
    "title": "انهيار المعالج دائم التشغيل AOP",

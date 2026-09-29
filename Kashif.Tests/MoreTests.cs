@@ -13,6 +13,7 @@ static partial class Program
     static void RunMore()
     {
         Run("تناسق قاعدة المعرفة", KnowledgeConsistency);
+        Run("رموز موثّقة من iFixit (الإصدار 6)", VerifiedCodes);
         Run("السجلات ونتائجها المتوقعة (.expected)", ExpectedSamples);
         Run("اللقطات: ترتيب الأسباب لم يتغير دون قصد", Snapshots);
         Run("تحمّل: نصوص تالفة وعشوائية", Fuzz);
@@ -430,5 +431,33 @@ static partial class Program
             else Console.WriteLine($"  ! لا يوجد في النص: {e.What} ← «{e.Needle}»");
         }
         Check(total >= 6 && found == total, $"كل دليل له موضع في النص: {found}/{total}");
+    }
+
+    /// <summary>الرموز المضافة من ويكي iFixit «iPhone Kernel Panics»: كل رمز يصل إلى القطعة التي يذكرها المصدر</summary>
+    static void VerifiedCodes()
+    {
+        Diagnosis One(string text)
+        {
+            var logs = PanicParser.ParseMany(text, "نص");
+            Check(logs.Count == 1, $"سجل واحد (وجد {logs.Count})");
+            return PanicAnalyzer.Analyze(logs[0]);
+        }
+        var bosch = One("panic(cpu 0 caller 0xfffffff0283a1b2c): AOP PANIC - K2 - Bosch control channel write failure");
+        Check(bosch.TopPart == Parts.ChargingFlex, "Bosch: الأرجح=" + bosch.TopPart);
+        var nmi = One("panic(cpu 1 caller 0xfffffff0283a1b2c): AOP NMI POWER");
+        Check(nmi.TopPart == Parts.PowerFlex, "NMI POWER: الأرجح=" + nmi.TopPart);
+        Check(nmi.Candidates.Any(c => c.Part == Parts.FrontFlex), "NMI POWER: فلاتة الكاميرا الأمامية بين الأسباب");
+        var sepRom = One("panic(cpu 0 caller 0xfffffff0283a1b2c): SEP ROM boot panic");
+        Check(sepRom.TopPart == Parts.Board, "SEP ROM: الأرجح=" + sepRom.TopPart);
+        var hot = One("panic(cpu 2 caller 0xfffffff0283a1b2c): AppleSocHot: hot hot hot");
+        Check(hot.TopPart == Parts.Board, "AppleSocHot: الأرجح=" + hot.TopPart);
+
+        // TG0V: على 11 Pro Max فلاتة الشحن بين الأسباب (موصل البطارية الثاني)، وعلى غيره لا
+        var mic1 = Sample("mic1_iphonex_valid.ips").Replace("Missing sensor(s): mic1", "Missing sensor(s): TG0V");
+        var pm = PanicAnalyzer.Analyze(PanicParser.ParseMany(mic1.Replace("iPhone10,3", "iPhone12,5"), "11pm")[0]);
+        Check(pm.TopPart == Parts.Battery, "TG0V على 11 Pro Max: الأرجح=" + pm.TopPart);
+        Check(pm.Candidates.Any(c => c.Part == Parts.ChargingFlex), "TG0V على 11 Pro Max: فلاتة الشحن بين الأسباب");
+        var x = PanicAnalyzer.Analyze(PanicParser.ParseMany(mic1, "x")[0]);
+        Check(x.TopPart == Parts.Battery, "TG0V على iPhone X: الأرجح=" + x.TopPart);
     }
 }
