@@ -48,7 +48,7 @@ public class DashboardForm : BaseForm
         var recentCard = new CardPanel { Dock = DockStyle.Fill, Title = "آخر الفحوصات", Subtitle = "نقر مزدوج لفتح الفحص", IconName = "history" };
         var grid = Ui.NewGrid();
         if (Session.Can("history"))
-            grid.DataSource = Db.Query(@"SELECT id, date AS [التاريخ], customer AS [الزبون], device AS [الجهاز], title AS [التشخيص], top_part AS [الأرجح], status AS [الحالة]
+            grid.DataSource = Db.Query(@"SELECT id, date AS [التاريخ], device AS [الجهاز], title AS [التشخيص], top_part AS [الأرجح], status AS [الحالة]
                 FROM analyses ORDER BY id DESC LIMIT 50");
         grid.CellDoubleClick += (s, e) => { if (e.RowIndex >= 0) AnalyzeForm.OpenRecord(Db.L(grid.Rows[e.RowIndex].Cells["id"].Value)); };
         recentCard.Controls.Add(grid);

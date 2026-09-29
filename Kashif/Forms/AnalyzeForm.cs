@@ -7,7 +7,7 @@ namespace Kashif;
 /// يمين: الجهاز والتشخيص، ثم أزرار الأسباب مرتبة. يسار: مخطط الجهاز تُلوَّن فيه أماكن القطع المشتبه بها.
 /// النقر على سبب أو قطعة (أو زر «الفحص والخطوات») يفتح نافذة فيها دليل القطعة، الخلاصة، ما حدث للجهاز،
 /// سؤال الفحص التفاعلي، خطوات الفحص، والأدلة من السجل (النقر على الدليل يفتح نص السجل مظللًا عند مكانه).
-/// قائمة السجلات جانبية تُطوى، وبقية التفاصيل (نص السجل، الزبون، التقرير، الخط الزمني، الفحوصات السابقة) في نوافذ عند الطلب.
+/// قائمة السجلات جانبية تُطوى، وبقية التفاصيل (نص السجل، النتيجة، التقرير، الخط الزمني، الفحوصات السابقة) في نوافذ عند الطلب.
 /// </summary>
 public class AnalyzeForm : BaseForm
 {
@@ -89,7 +89,7 @@ public class AnalyzeForm : BaseForm
         bExam = Theme.Btn("الفحص والخطوات", Theme.Brand, 170, "list-checks");
         bRaw = Theme.Btn("نص السجل", Theme.Gray, 120, "scroll-text");
         bClear = Theme.Btn("فحص جديد", Theme.Gray, 120, "plus");
-        bCustomer = Theme.Btn("الزبون والنتيجة", Theme.Gray, 150, "user");
+        bCustomer = Theme.Btn("النتيجة", Theme.Gray, 110, "clipboard-check");
         bSave = Theme.Btn("حفظ في السجل", Theme.Success, 140, "save");
         bReport = Theme.Btn("التقرير", Theme.Gray, 110, "file-text");
         bMore = Theme.Btn("المزيد", Theme.Gray, 100, "ellipsis");
@@ -615,9 +615,9 @@ public class AnalyzeForm : BaseForm
     // ============================================================== الزبون والحفظ والتقارير
     void EditCustomer()
     {
-        using var dlg = new CustomerDialog(customerName, phoneText, statusText, fixedPartText, notesText, shown);
+        using var dlg = new CustomerDialog(statusText, fixedPartText, notesText, shown);
         if (dlg.ShowModal() != DialogResult.OK) return;
-        customerName = dlg.Customer; phoneText = dlg.Phone; statusText = dlg.Status; fixedPartText = dlg.FixedPart; notesText = dlg.Notes;
+        statusText = dlg.Status; fixedPartText = dlg.FixedPart; notesText = dlg.Notes;
         dirty = true;
         if (dlg.SaveNow) SaveRecord(silent: false);
     }
@@ -666,8 +666,7 @@ public class AnalyzeForm : BaseForm
         var d = shown;
         var doc = PrintDoc.Header(forCustomer ? "تقرير فحص الجهاز" : "تقرير فحص الجهاز — للفني");
         doc.ForceA4 = true;
-        doc.Pair("الزبون", customerName.Trim() == "" ? "—" : customerName.Trim(), "الهاتف", phoneText.Trim() == "" ? "—" : phoneText.Trim());
-        doc.Pair("الجهاز", d.Device == "" ? "غير معروف" : d.Device, "رقم الفحص", recordId > 0 ? recordId.ToString() : "غير محفوظ");
+        doc.Pair("الجهاز", d.Device == "" ? "غير معروف" : d.Device);
         doc.Line();
         if (forCustomer)
         {
@@ -820,23 +819,19 @@ public class RawDialog : DialogShell
     }
 }
 
-/// <summary>بيانات الزبون ونتيجة الإصلاح (القطعة التي أصلحت الجهاز فعلًا تحسب دقة البرنامج وتقترح قواعد جديدة)</summary>
+/// <summary>نتيجة الإصلاح: حالة الجهاز، والقطعة التي أصلحته فعلًا (تحسب دقة البرنامج وتقترح قواعد جديدة)، والملاحظات</summary>
 public class CustomerDialog : DialogShell
 {
-    readonly TextBox customer = new() { Width = 300, PlaceholderText = "اسم الزبون" };
-    readonly TextBox phone = new() { Width = 220, PlaceholderText = "07xx xxx xxxx" };
     readonly ComboBox status = Ui.Combo(220);
     readonly ComboBox fixedPart = new() { Width = 540, DropDownStyle = ComboBoxStyle.DropDown, Font = Theme.F(10) };
     readonly TextBox notes = new() { Width = 760, Height = 100, Multiline = true, ScrollBars = ScrollBars.Vertical, PlaceholderText = "ما وجدته عند الفحص، ما جرّبته، النتيجة..." };
 
-    public string Customer => customer.Text.Trim();
-    public string Phone => phone.Text.Trim();
     public string Status => status.Text;
     public string FixedPart => fixedPart.Text.Trim();
     public string Notes => notes.Text.Trim();
     public bool SaveNow { get; private set; }
 
-    public CustomerDialog(string c, string p, string st, string fixedText, string n, Diagnosis d) : base("الزبون والنتيجة", 840, 560, "user")
+    public CustomerDialog(string st, string fixedText, string n, Diagnosis d) : base("النتيجة", 840, 500, "clipboard-check")
     {
         status.Items.AddRange(PanicStore.Statuses);
         status.SelectedIndex = Math.Max(0, Array.IndexOf(PanicStore.Statuses, st));
@@ -845,11 +840,9 @@ public class CustomerDialog : DialogShell
         fixedPart.Items.AddRange(suggested.Concat(Parts.All.Where(x => !suggested.Contains(x)).OrderBy(x => x)).Cast<object>().ToArray());
         fixedPart.AutoCompleteMode = AutoCompleteMode.SuggestAppend;
         fixedPart.AutoCompleteSource = AutoCompleteSource.ListItems;
-        customer.Text = c; phone.Text = p; fixedPart.Text = fixedText; notes.Text = n;
+        fixedPart.Text = fixedText; notes.Text = n;
 
         var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, BackColor = Theme.Surface, AutoScroll = true, Padding = new Padding(4, 6, 4, 4) };
-        flow.Controls.Add(Ui.Labeled("الزبون", customer));
-        flow.Controls.Add(Ui.Labeled("الهاتف", phone));
         flow.Controls.Add(Ui.Labeled("حالة الجهاز", status));
         flow.SetFlowBreak(flow.Controls[^1], true);
         flow.Controls.Add(Ui.Labeled("القطعة التي أصلحت الجهاز فعلًا (بعد الإصلاح)", fixedPart));
@@ -866,7 +859,7 @@ public class CustomerDialog : DialogShell
         AddButton("موافق", DialogResult.OK, BtnKind.Secondary, "check");
         var save = AddButton("موافق وحفظ في السجل", DialogResult.OK, BtnKind.Primary, "save");
         save.Click += (s, e) => SaveNow = true;
-        Shown += (s, e) => customer.Focus();
+        Shown += (s, e) => fixedPart.Focus();
     }
 }
 

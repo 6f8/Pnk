@@ -2,13 +2,13 @@ using System.Data;
 
 namespace Kashif;
 
-/// <summary>سجل الفحوصات: كل تحليل محفوظ — بحث بالزبون أو الهاتف أو الجهاز أو القطعة، فلتر بالحالة والتاريخ، فتح وحذف</summary>
+/// <summary>سجل الفحوصات: كل تحليل محفوظ — بحث بالجهاز أو القطعة أو التشخيص، فلتر بالحالة والتاريخ، فتح وحذف</summary>
 public class HistoryForm : BaseForm
 {
     public const string PageTitle = "سجل الفحوصات";
 
     readonly DataGridView grid = Ui.NewGrid();
-    readonly TextBox search = new() { Width = 300, PlaceholderText = "بحث: الزبون، الهاتف، الجهاز، القطعة، التشخيص" };
+    readonly TextBox search = new() { Width = 300, PlaceholderText = "بحث: الجهاز، القطعة، التشخيص" };
     readonly ComboBox cbStatus = Ui.Combo(170);
     readonly DateTimePicker from = new() { Format = DateTimePickerFormat.Short, Width = 150 }, to = new() { Format = DateTimePickerFormat.Short, Width = 150 };
     readonly CardPanel card;
@@ -67,10 +67,10 @@ public class HistoryForm : BaseForm
         var q = search.Text.Trim();
         var st = cbStatus.SelectedIndex > 0 ? cbStatus.Text : "";
         long keep = SelectedId();
-        grid.DataSource = Db.Query(@"SELECT id, date AS [التاريخ], customer AS [الزبون], phone AS [الهاتف], device AS [الجهاز],
+        grid.DataSource = Db.Query(@"SELECT id, date AS [التاريخ], device AS [الجهاز],
                 title AS [التشخيص], top_part AS [الأرجح], IFNULL(fixed_part,'') AS [القطعة المُصلِحة], confidence AS [الثقة], status AS [الحالة], logs AS [السجلات]
             FROM analyses
-            WHERE (@p0='' OR customer LIKE @p1 OR phone LIKE @p1 OR device LIKE @p1 OR product LIKE @p1 OR title LIKE @p1
+            WHERE (@p0='' OR device LIKE @p1 OR product LIKE @p1 OR title LIKE @p1
                    OR top_part LIKE @p1 OR fixed_part LIKE @p1 OR kind LIKE @p1 OR notes LIKE @p1 OR device_key=@p0 OR signature=@p0)
               AND (@p2='' OR status=@p2) AND date BETWEEN @p3 AND @p4
             ORDER BY id DESC LIMIT 2000",

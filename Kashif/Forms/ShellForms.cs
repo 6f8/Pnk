@@ -80,7 +80,7 @@ public class MainForm : BaseForm
 
             new(AnalyzeForm.PageTitle, "analyze", "scan-line", "التحليل", "افتح ملفات panic-full أو الصق النص — التشخيص والأسباب وخطوات الفحص (F2)", () => new AnalyzeForm()),
 
-            new(HistoryForm.PageTitle, "history", "history", "سجل الفحوصات", "كل الفحوصات المحفوظة: الزبون، الجهاز، التشخيص، الحالة", () => new HistoryForm()),
+            new(HistoryForm.PageTitle, "history", "history", "سجل الفحوصات", "كل الفحوصات المحفوظة: الجهاز، التشخيص، الحالة", () => new HistoryForm()),
 
             new(ReferenceForm.PageTitle, "analyze", "book-open", "قاعدة المعرفة", "رموز الحساسات وأنواع البانك وخدمات النظام ومعنى كل منها", () => new ReferenceForm()),
             new("خبرة المحل", "kb", "lightbulb", "قاعدة المعرفة", "أضف ما تعلمته: نص يظهر في السجل ← القطعة التي كانت السبب", () => new CrudForm(Defs.KbRules())),
