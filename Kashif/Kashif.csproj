@@ -8,6 +8,7 @@
     <AssemblyName>Kashif</AssemblyName>
     <RootNamespace>Kashif</RootNamespace>
     <ApplicationHighDpiMode>SystemAware</ApplicationHighDpiMode>
+    <ApplicationIcon>Assets\kashif.ico</ApplicationIcon>
     <Version>1.0.0</Version>
     <Product>كاشف</Product>
     <Company>يوسف أحمد</Company>

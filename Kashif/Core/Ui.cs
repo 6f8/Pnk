@@ -14,6 +14,7 @@ public class BaseForm : Form
         ForeColor = Theme.Ink;
         StartPosition = FormStartPosition.CenterScreen;
         AutoScaleMode = AutoScaleMode.None;
+        Icon = Brand.AppIcon;
     }
 
     /// <summary>تم تكبير أبعاد الشاشة حسب دقة العرض (مرة واحدة فقط)</summary>

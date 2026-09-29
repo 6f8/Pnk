@@ -7,15 +7,44 @@ namespace Kashif;
 /// <summary>شعار البرنامج: مربع دائري بتدرج برتقالي/كهرماني وحرف «ك»</summary>
 public static class Brand
 {
+    static readonly Color Ground = ColorTranslator.FromHtml("#1B1A17"), Teal = ColorTranslator.FromHtml("#7FD1C6"),
+        Chip = ColorTranslator.FromHtml("#12302E"), Amber = ColorTranslator.FromHtml("#E9B872");
+
+    /// <summary>شعار البرنامج (الأيقونة 6: شريحة فيها نبض) بإحداثيات التصميم 256×256 — نفس رسم ملف kashif.ico</summary>
     public static void DrawMark(Graphics g, RectangleF r)
     {
         Gfx.Hq(g);
-        using (var p = Gfx.Round(r, r.Width * 0.28f))
-        using (var b = new LinearGradientBrush(r, Theme.Amber, Theme.Orange, 60f))
-            g.FillPath(b, p);
-        using (var p = Gfx.Round(RectangleF.Inflate(r, -1, -1), r.Width * 0.27f))
-        using (var pen = new Pen(Color.FromArgb(60, 255, 255, 255), 1)) g.DrawPath(pen, p);
-        TextRenderer.DrawText(g, "ك", FontKit.GetPx(r.Height * 0.53f, FontStyle.Bold), Rectangle.Round(new RectangleF(r.X, r.Y - r.Height * 0.06f, r.Width, r.Height)), Color.White, Gfx.Center);
+        float k = r.Width / 256f;
+        PointF P(float x, float y) => new(r.X + x * k, r.Y + y * k);
+        RectangleF R(float x, float y, float w, float h) => new(r.X + x * k, r.Y + y * k, w * k, h * k);
+        Gfx.FillRound(g, R(8, 8, 240, 240), 56 * k, Ground);
+        using (var pen = new Pen(Teal, Math.Max(1f, 10 * k)) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+        {
+            foreach (var (x1, y1, x2, y2) in new (float, float, float, float)[]
+            {
+                (104, 48, 104, 72), (152, 48, 152, 72), (104, 184, 104, 208), (152, 184, 152, 208),
+                (48, 104, 72, 104), (48, 152, 72, 152), (184, 104, 208, 104), (184, 152, 208, 152),
+            })
+                g.DrawLine(pen, P(x1, y1), P(x2, y2));
+            Gfx.FillRound(g, R(72, 72, 112, 112), 18 * k, Chip);
+            using var chip = Gfx.Round(R(72, 72, 112, 112), 18 * k);
+            g.DrawPath(pen, chip);
+        }
+        using (var pulse = new Pen(Amber, Math.Max(1f, 10 * k)) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })
+            g.DrawLines(pulse, new[] { P(92, 130), P(112, 130), P(122, 108), P(136, 152), P(146, 130), P(164, 130) });
+    }
+
+    static Icon appIcon;
+
+    /// <summary>أيقونة البرنامج من ملفه التنفيذي (kashif.ico المضمّن)، أو أيقونة ويندوز العامة إن تعذّر</summary>
+    public static Icon AppIcon
+    {
+        get
+        {
+            if (appIcon != null) return appIcon;
+            try { appIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
+            return appIcon ??= SystemIcons.Application;
+        }
     }
 }
 
@@ -61,7 +90,7 @@ public class MainForm : BaseForm
     readonly ToolTip navTip = new();
     Panel logo, credits;
     bool rail;
-    readonly NotifyIcon tray = new() { Icon = SystemIcons.Application, Visible = true, Text = "كاشف" };
+    readonly NotifyIcon tray = new() { Icon = Brand.AppIcon, Visible = true, Text = "كاشف" };
     readonly System.Windows.Forms.Timer timer = new() { Interval = 30_000 };
     readonly Dictionary<string, (Form Form, Page Page)> open = new();
     readonly List<(NavSection Head, List<NavItem> Items)> sections = new();
