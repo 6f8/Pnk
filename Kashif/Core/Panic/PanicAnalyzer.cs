@@ -242,15 +242,21 @@ public static class PanicAnalyzer
             }
     }
 
+    /// <summary>
+    /// تصحيح أخطاء قراءة الصور في رمز الحساس: كل حرف يشبه 0 (O، o، e — قارئ ويندوز يقرأ الصفر المنقّط e)
+    /// أو يشبه 1 (l، I، i) يُجرَّب بالحالتين، ويُقبل التصحيح فقط إن طابق رمزًا معروفًا في قاعدة المعرفة.
+    /// </summary>
     static string FixSensor(string t)
     {
-        var candidates = new[]
+        var options = t.Select(c => c switch
         {
-            t.Replace('O', '0').Replace('o', '0'),
-            t.Replace('l', '1').Replace('I', '1'),
-            t.Replace('O', '0').Replace('o', '0').Replace('l', '1').Replace('I', '1'),
-        };
-        return candidates.Where(c => c != t).Select(PanicKnowledge.FindSensor).FirstOrDefault(s => s != null)?.Code;
+            'O' or 'o' or 'e' => new[] { c, '0' },
+            'l' or 'I' or 'i' => new[] { c, '1' },
+            _ => new[] { c },
+        }).ToList();
+        IEnumerable<string> all = new[] { "" };
+        foreach (var o in options) all = all.SelectMany(prefix => o.Select(c => prefix + c));
+        return all.Where(c => c != t).Take(256).Select(PanicKnowledge.FindSensor).FirstOrDefault(x => x != null)?.Code;
     }
 
     /// <summary>ثواني الانتظار في سطر الخدمة نفسها: «service: X ..., no successful checkins in 196 seconds»</summary>

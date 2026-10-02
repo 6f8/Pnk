@@ -1,0 +1,59 @@
+{"bug _ type" "213' "timestamp •
+"2e26-e9-21 -e7eet', "
+os version : "
+" iPhone os 27 .e
+(24A437)", "roots installed" : e, "incident
+"crashReporterKey" :
+_id" 3F39e461-D748-432A-B9eE-3ED6479DEC29"}
+"4e8ed2fecd31cd25e8e5d279f713938d19728d75",
+"panic ProcessingF1ags"
+"product": "iPhone12, 1" ,
+: 'texe" ,
+"kernel
+": "Darwin Kernel Version 27. e. e: Thu Aug 13
+PDT 2e26; root:xnu-13432.2.1eN2/
+RELEASE ARM64 T8eset',
+" socRevision": "11
+"panicString" .
+"panic(cpu e caller exfffffff041eeb124) :
+userspace watchdog timeout: no successful checkins from thermalmonitord (2 induced crashes
+service returned not alive with context: is_alive_func returned unhealthy: current 37fffff
+mask expected
+• 1 BS: 1, Missing sensor(s): Prse
+SD: 1 BC: 1 RC. -
+service: backboardd, total successful checkins in 196 seconds: 19, last successful checkin
+e seconds ago
+service: SpringBoard, total successful checkins in 169 seconds: 17, last successful checki
+n: e seconds ago
+service: audiomxd, total successful checkins in 196 seconds: 18, last successful checkin:
+e seconds ago
+service: logd, total successful checkins in 196 seconds: 19, last successful checkin: e se
+conds ago
+service: thermalmonitord (2 induced crashes), no successful checkins in 196 seconds
+service: runningboardd, total successful checkins in 196 seconds: 19, last successful chec
+kin: e seconds ago
+service: wifid, total successful checkins in 196 seconds: 19, last successful checkin: e s
+econds ago
+service: configd, total successful checkins in 196 seconds: 19, last successful checkin: e
+seconds ago
+service: CommCenter, total successful checkins in 196 seconds: 18, last successful checkin
+e seconds ago
+Debugger message: panic
+Memory ID: Oxff
+OS release type: IJser
+OS version: 24A437
+Kernel version: Darwin Kernel Version 27.e.e: Thu Aug 13 PDT 2026;
+. 2.10-2/
+Fileset Kernelcache UUID: 89ACAeD9F2E496E9B95AC681CF41C386
+Kernel UUID: B34FA6EE-3862-3eB8-BFEB-eEeC25B9D326
+Boot session UUID: 3F39e461-D748-432A-B9eE-3ED6479DEC29
+iBoot version:
+mBoot-20457.2.37
+secure boot? : YES
+roots installed:
+e
+Panic log version: 16
+Debug Header address: xfffffffe20bc9eee
+Debug Header entry count: 3
+TXM
+root:xnu-13432

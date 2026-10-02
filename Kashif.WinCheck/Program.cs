@@ -12,7 +12,8 @@ foreach (var raw in text.Replace("\\n", "\n").Split('\n'))
     while (l.Length > 90) { lines.Add(l[..90]); l = l[90..]; }
     lines.Add(l);
 }
-using var font = new Font("Consolas", 15f);
+// خط قريب من خط الآيفون (صفر بلا نقطة) — قارئ ويندوز يقرأ صفر Consolas المنقّط حرف e
+using var font = new Font("Segoe UI", 15f);
 int lineH = 26, w = 1300, h = lines.Count * lineH + 40;
 using var bmp = new Bitmap(w, h);
 using (var g = Graphics.FromImage(bmp))
