@@ -41,6 +41,10 @@ public class AnalyzeForm : BaseForm
     readonly HashSet<string> doneSteps = new();
     readonly List<(string Id, int Answer)> answers = new();
     readonly HashSet<string> skipped = new();
+    // من الجهاز نفسه (لا من السجل): البطارية مقاسة بالكيبل ونتائج اختبار العزل — تُطبَّق على التحليل المعروض
+    readonly List<IsolationResult> isolations = new();
+    Kashif.Device.BatteryHealth battery;
+    string batteryProduct = "";
     string customerName = "", phoneText = "", notesText = "", statusText = PanicStore.Statuses[0], fixedPartText = "";
     Diagnosis shown;
     List<PanicLog> shownLogs = new();
@@ -100,6 +104,9 @@ public class AnalyzeForm : BaseForm
         bar.Controls.AddRange(new Control[] { bOpen, bPaste, bDevice, bExam, bClear, tCombine, bCustomer, bSave, bReport, bMore });
         foreach (var b in bar.Controls.OfType<ModernButton>()) { b.Height = 40; b.Margin = new Padding(4, 3, 4, 3); }
         moreMenu.Font = Theme.F(10.5f);
+        moreMenu.Items.Add("اختبار العزل (وضع الطاولة)", null, (s, e) => ShowIsolation());
+        moreMenu.Items.Add("صحة البطارية من الآيفون", null, (s, e) => ReadBatteryFromDevice());
+        moreMenu.Items.Add(new ToolStripSeparator());
         moreMenu.Items.Add("نص السجل", null, (s, e) => ShowRaw(null));
         var logsItem = new ToolStripMenuItem("إظهار قائمة السجلات", null, (s, e) => { logsToggledByUser = true; SetLogsVisible(!logsCard.Visible); });
         moreMenu.Items.Add(logsItem);
@@ -262,6 +269,8 @@ public class AnalyzeForm : BaseForm
         else dlg.Load += (s, e) => Attach(true);
         dlg.Body.Controls.Add(grid);
         dlg.AddButton("إغلاق", DialogResult.Cancel, BtnKind.Secondary);
+        var bIso = dlg.AddButton("اختبار العزل", DialogResult.None, BtnKind.Primary, "clock");
+        bIso.Click += (s, e) => ShowIsolation();
         try { dlg.ShowModal(); }
         finally
         {
@@ -421,6 +430,7 @@ public class AnalyzeForm : BaseForm
         }
         if (IsDisposed) return;
         var device = string.Join(" · ", new[] { pull.DeviceName, AppleDevices.Name(pull.ProductType), pull.Version == "" ? "" : "iOS " + pull.Version }.Where(x => !string.IsNullOrWhiteSpace(x)));
+        if (pull.Battery is { Valid: true }) SetBattery(pull.Battery, pull.ProductType);
         if (pull.Logs.Count == 0)
         {
             Dialogs.Message($"{device}\n\nلا توجد سجلات بانك في الجهاز.\nإن كان الجهاز يعيد التشغيل فعلًا، انتظر حتى يحدث البانك مرة ثم أعد السحب.", "السحب من الآيفون", Tone.Info);
@@ -430,10 +440,56 @@ public class AnalyzeForm : BaseForm
         var found = pull.Logs.SelectMany(l => PanicParser.ParseMany(l.Text, l.Name)).ToList();
         Merge(found);
         var notes = new List<string>();
+        notes.Add(pull.Battery is { Valid: true } ? "البطارية (مقاسة بالكيبل): " + pull.Battery : "تعذرت قراءة صحة البطارية من هذا الجهاز.");
         if (pull.Older > 0) notes.Add($"سُحب أحدث {pull.Logs.Count} سجل، وفي الجهاز {pull.Older} سجلات أقدم لم تُسحب.");
         if (pull.Failed > 0) notes.Add($"تعذرت قراءة {pull.Failed} سجل.");
         Toast.Show($"سُحب {pull.Logs.Count} سجل من {device}");
-        if (notes.Count > 0) Dialogs.Message(string.Join("\n", notes), "السحب من الآيفون", Tone.Info);
+        Dialogs.Message(string.Join("\n", notes), "السحب من الآيفون", Tone.Info);
+    }
+
+    /// <summary>البطارية مقاسة من الجهاز: تُحفظ في الملاحظات (تبقى مع الفحص) وتُطبَّق على الترتيب</summary>
+    void SetBattery(Kashif.Device.BatteryHealth b, string product)
+    {
+        battery = b;
+        batteryProduct = product ?? "";
+        var line = "البطارية (مقاسة بالكيبل): " + b;
+        if (!notesText.Contains(line, StringComparison.Ordinal)) notesText = (notesText.TrimEnd() + "\n" + line).Trim();
+        dirty = true;
+    }
+
+    async void ReadBatteryFromDevice()
+    {
+        if (busy) return;
+        busy = true;
+        UpdateButtons();
+        (string Name, string Product, Kashif.Device.BatteryHealth Battery) r;
+        try { r = await Task.Run(() => Kashif.Device.CrashReports.ReadBattery()); }
+        catch (Kashif.Device.DeviceException ex) { Dialogs.Warn(ex.Message, "صحة البطارية"); return; }
+        catch (Exception ex) { Dialogs.Warn("تعذرت قراءة البطارية: " + ex.Message, "صحة البطارية"); return; }
+        finally { busy = false; if (!IsDisposed) UpdateButtons(); }
+        if (IsDisposed) return;
+        SetBattery(r.Battery, r.Product);
+        ShowResult();
+        var verdict = r.Battery.Percent >= 85 && r.Battery.CycleCount < 1000 ? "سليمة: لا تبدّلها قبل اختبار العزل."
+            : r.Battery.Percent < 80 ? "سعتها منخفضة: تستحق التبديل لأجل عمر الشحن، لكنها وحدها لا تفسّر بانكًا يذكر قطعة أخرى." : "مقبولة.";
+        Dialogs.Message($"{r.Name} · {AppleDevices.Name(r.Product)}\n\n{r.Battery}\n\n{verdict}\n\nالنسبة محسوبة من السعة الحالية والأصلية التي يسجلها الجهاز، وقد تختلف ببضع درجات عن «السعة القصوى» في الإعدادات.",
+            "صحة البطارية", Tone.Info);
+    }
+
+    /// <summary>وضع الطاولة: اختبار العزل بعدّاد، ونتيجته تعيد ترتيب الأسباب وتُحفظ في الملاحظات</summary>
+    void ShowIsolation()
+    {
+        if (shown == null) return;
+        using var f = new IsolationForm(shown);
+        var owner = Form.ActiveForm ?? (Form)this.FindForm();
+        f.ShowDialog(owner);
+        if (f.Results.Count == 0) return;
+        isolations.AddRange(f.Results);
+        foreach (var r in f.Results)
+            notesText = (notesText.TrimEnd() + $"\nاختبار العزل: فُصلت {r.Part} — {(r.Stopped ? "بقي يعمل" : "أعاد التشغيل")} ({r.Duration})").Trim();
+        dirty = true;
+        ShowResult();
+        Toast.Show(f.Results[^1].Stopped ? $"«{f.Results[^1].Part}» ارتفعت إلى أعلى الأسباب" : $"«{f.Results[^1].Part}» انخفضت — ليست السبب");
     }
 
     /// <summary>صورة في الحافظة (لقطة شاشة للسجل): تُقرأ بقارئ النصوص في الخلفية ثم تُحلَّل</summary>
@@ -503,6 +559,9 @@ public class AnalyzeForm : BaseForm
         doneSteps.Clear();
         answers.Clear();
         skipped.Clear();
+        isolations.Clear();
+        battery = null;
+        batteryProduct = "";
         logsToggledByUser = false;
         SetLogsVisible(false);
         loading = false;
@@ -612,6 +671,9 @@ public class AnalyzeForm : BaseForm
             shownLogs = new List<PanicLog> { logs[i] };
         }
         PanicAnalyzer.ApplyAnswers(shown, answers);
+        foreach (var iso in isolations) PanicAnalyzer.ApplyIsolation(shown, iso.Part, iso.Stopped, iso.Duration);
+        if (battery is { Valid: true } && (batteryProduct == "" || shown.Product == "" || shown.Product == batteryProduct))
+            PanicAnalyzer.ApplyBattery(shown, battery.Percent, battery.CycleCount);
 
         var extra = new List<string>();
         int devices = groups.Distinct().Count();

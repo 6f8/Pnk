@@ -20,6 +20,8 @@ static partial class Program
         Run("الآيفون: سحب السجلات من جهاز وهمي", PullFromFakeDevice);
         Run("الآيفون: رسائل الأخطاء المفهومة", DeviceErrors);
         Run("الآيفون: TLS بشهادة سجل الاقتران (PEM)", PairTls);
+        Run("البطارية المقاسة واختبار العزل في الترتيب", BatteryAndIsolation);
+        Run("مراقبة إعادة التشغيل بالكيبل", RebootWatching);
     }
 
     static void PlistFormats()
@@ -78,6 +80,10 @@ static partial class Program
         Check(fake.MoverPinged, "خدمة نقل السجلات شُغّلت");
         Check(fake.Writes == 0, "لا كتابة ولا حذف في الجهاز");
         Check(pull.Failed == 0 && pull.Older == 0, $"failed={pull.Failed} older={pull.Older}");
+        Check(pull.Battery is { Valid: true, Percent: 90, CycleCount: 412, DesignMah: 4352, FullMah: 3918 } && pull.Battery.TemperatureC == 29.5,
+            "البطارية من خدمة التشخيص: " + pull.Battery);
+        var only = CrashReports.ReadBattery(new Usbmux("127.0.0.1", fake.Port));
+        Check(only.Battery?.Percent == 90 && only.ProductType == "iPhone14,3", "قراءة البطارية وحدها");
     }
 
     static void DeviceErrors()
@@ -100,6 +106,65 @@ static partial class Program
             try { CrashReports.Pull(new Usbmux("127.0.0.1", fake.Port)); Check(false, "كان يجب أن يفشل"); }
             catch (DeviceException ex) { Check(ex.Message.Contains("افتح قفل"), "رسالة: " + ex.Message); }
         }
+    }
+
+    static void BatteryAndIsolation()
+    {
+        var b = BatteryReader.Parse(new Dictionary<string, object> { ["CycleCount"] = 900L, ["DesignCapacity"] = 3000L, ["AppleRawMaxCapacity"] = 2250L });
+        Check(b is { Percent: 75, CycleCount: 900 }, "AppleRawMaxCapacity عند غياب NominalChargeCapacity: " + b);
+        Check(BatteryReader.Parse(new()) is { Valid: false }, "بلا قيم: غير صالحة");
+        Check(BatteryReader.Parse(null) == null, "null");
+
+        // حالة iPhone 13 Pro Max: البطارية الأخيرة بلا دليل؛ بطارية سليمة بالقياس تنخفض أكثر ولا تتقدم
+        Diagnosis Fresh() => PanicAnalyzer.Analyze(PanicParser.ParseMany(Sample("smc_bsc_d64_screen_sensor.ips"), "x")[0]);
+        var d = Fresh();
+        int before = d.Candidates.First(c => c.Part == Parts.Battery).Score;
+        PanicAnalyzer.ApplyBattery(d, 94, 210);
+        Check(d.Candidates.First(c => c.Part == Parts.Battery).Score == Math.Max(1, before - 25), "بطارية سليمة ← -25");
+        Check(d.Evidence.Any(e => e.What == "البطارية مقاسة بالكيبل" && e.IsExam), "دليل البطارية من الفحص");
+        Check(d.TopPart != Parts.Battery, "البطارية ليست الأرجح");
+
+        var weak = Fresh();
+        PanicAnalyzer.ApplyBattery(weak, 71, 1100);
+        Check(weak.Candidates.First(c => c.Part == Parts.Battery).Score == before + 10, "بطارية ضعيفة ← +10 فقط");
+        Check(weak.TopPart != Parts.Battery, "ضعف السعة وحده لا يجعلها الأرجح في انهيار يذكر حساسًا آخر");
+
+        // اختبار العزل: فصل حساس الشاشة أوقف الانهيار ← يتقدم؛ فصل فلاتة الشحن لم يوقفه ← تنخفض
+        var iso = Fresh();
+        int charge = iso.Candidates.First(c => c.Part == Parts.ChargingFlex).Score;
+        PanicAnalyzer.ApplyIsolation(iso, Parts.ChargingFlex, false, "02:58");
+        PanicAnalyzer.ApplyIsolation(iso, Parts.FrontFlex, true, "06:00");
+        Check(iso.TopPart == Parts.FrontFlex && iso.Candidates[0].Label == "الأرجح", "الحساس الأمامي الأرجح بعد العزل");
+        Check(iso.Candidates.First(c => c.Part == Parts.ChargingFlex).Score == Math.Max(1, charge - 30), "فلاتة الشحن -30");
+        PanicAnalyzer.ApplyIsolation(iso, "فلاتة لم تُذكر", true, "06:00");
+        Check(iso.Evidence.Count(e => e.What == "اختبار العزل") == 3, "نص حر يُسجَّل دليلًا");
+    }
+
+    static void RebootWatching()
+    {
+        Check(RebootWatch.LimitFor(180) == TimeSpan.FromSeconds(360), "3 دقائق ← 6");
+        Check(RebootWatch.LimitFor(60) == TimeSpan.FromSeconds(240), "الحد الأدنى 4 دقائق");
+        Check(RebootWatch.LimitFor(null) == TimeSpan.FromMinutes(6), "غير معروف ← 6");
+        Check(RebootWatch.LimitFor(3600) == TimeSpan.FromMinutes(15), "الحد الأعلى 15");
+
+        var t0 = new DateTime(2026, 10, 2, 12, 0, 0);
+        var present = new List<string> { "U1" };
+        var w = new RebootWatch(() => present.ToList());
+        w.Start(t0, TimeSpan.FromMinutes(6));
+        Check(w.Watching && w.Udid == "U1", "يراقب الجهاز الموصول");
+        Check(w.Tick(t0.AddSeconds(100)) == RebootWatch.State.Running, "ما زال يعمل");
+        present.Clear();
+        Check(w.Tick(t0.AddSeconds(182)) == RebootWatch.State.Rebooted && w.Result == TimeSpan.FromSeconds(182), "انقطع ← أعاد التشغيل بعد 3:02");
+        Check(RebootWatch.Clock(w.Result) == "03:02", "الساعة " + RebootWatch.Clock(w.Result));
+
+        present.Add("U1");
+        w.Start(t0, TimeSpan.FromMinutes(6));
+        Check(w.Tick(t0.AddMinutes(6)) == RebootWatch.State.Passed, "تجاوز المهلة ← بقي يعمل");
+
+        var none = new RebootWatch(() => throw new InvalidOperationException("no service"));
+        none.Start(t0, TimeSpan.FromMinutes(6));
+        Check(!none.Watching && none.Tick(t0.AddSeconds(30)) == RebootWatch.State.Running, "بلا خدمة Apple: بلا مراقبة ولا خطأ");
+        Check(none.Mark(true, t0.AddSeconds(200)) == RebootWatch.State.Rebooted && RebootWatch.Clock(none.Result) == "03:20", "الحكم اليدوي");
     }
 
     static void PairTls()
@@ -185,7 +250,7 @@ static partial class Program
     /// <summary>آيفون وهمي: usbmuxd على منفذ محلي، وخلفه lockdownd وخدمتا سجلات الأعطال (بلا TLS)</summary>
     sealed class FakeIPhone : IDisposable
     {
-        const int MoverPort = 1001, CopyPort = 1002;
+        const int MoverPort = 1001, CopyPort = 1002, DiagPort = 1003;
         readonly TcpListener listener = new(IPAddress.Loopback, 0);
         readonly Dictionary<string, string> files;
         readonly int devices;
@@ -259,6 +324,7 @@ static partial class Program
                     if (port == Lockdown.Port) ServeLockdown(s);
                     else if (port == MoverPort) { s.Write(Encoding.ASCII.GetBytes("ping")); MoverPinged = true; }
                     else if (port == CopyPort) ServeAfc(s);
+                    else if (port == DiagPort) ServeDiagnostics(s);
                     break;
             }
         }
@@ -284,10 +350,45 @@ static partial class Program
                         r["Value"] = req.Str("Key") switch { "DeviceName" => "iPhone يوسف", "ProductType" => "iPhone14,3", "ProductVersion" => "26.0", _ => "" };
                         break;
                     case "StartService":
-                        r["Port"] = req.Str("Service") == CrashReports.Mover ? (long)MoverPort : req.Str("Service") == CrashReports.Copy ? (long)CopyPort : 0L;
+                        r["Port"] = req.Str("Service") switch
+                        {
+                            CrashReports.Mover => (long)MoverPort, CrashReports.Copy => (long)CopyPort, BatteryReader.Service => (long)DiagPort, _ => 0L,
+                        };
                         r["EnableServiceSSL"] = false;
                         break;
                 }
+                var outBody = Plist.ToXml(r);
+                var outLen = new byte[4];
+                BinaryPrimitives.WriteUInt32BigEndian(outLen, (uint)outBody.Length);
+                s.Write(outLen);
+                s.Write(outBody);
+            }
+        }
+
+        /// <summary>خدمة التشخيص: AppleSmartBattery بقيم iOS حديث (السعة الأصلية داخل BatteryData)</summary>
+        void ServeDiagnostics(Stream s)
+        {
+            while (true)
+            {
+                var len = new byte[4];
+                try { s.ReadExactly(len); } catch { return; }
+                var body = new byte[BinaryPrimitives.ReadUInt32BigEndian(len)];
+                s.ReadExactly(body);
+                var req = Plist.ParseDict(body);
+                Dictionary<string, object> r = req.Str("Request") == "IORegistry" && req.Str("EntryName") == "AppleSmartBattery"
+                    ? new()
+                    {
+                        ["Status"] = "Success",
+                        ["Diagnostics"] = new Dictionary<string, object>
+                        {
+                            ["IORegistry"] = new Dictionary<string, object>
+                            {
+                                ["CycleCount"] = 412L, ["NominalChargeCapacity"] = 3918L, ["Temperature"] = 2950L,
+                                ["BatteryData"] = new Dictionary<string, object> { ["DesignCapacity"] = 4352L },
+                            },
+                        },
+                    }
+                    : new() { ["Status"] = req.Str("Request") == "Goodbye" ? "Success" : "UnknownRequest" };
                 var outBody = Plist.ToXml(r);
                 var outLen = new byte[4];
                 BinaryPrimitives.WriteUInt32BigEndian(outLen, (uint)outBody.Length);
