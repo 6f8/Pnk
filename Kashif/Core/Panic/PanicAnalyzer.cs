@@ -399,6 +399,41 @@ public static class PanicAnalyzer
     }
 
     /// <summary>
+    /// تاريخ أول بانك مقابل تاريخ آخر إصلاح (ضمن السجلات المتوفرة): أقدم بانك بعد الإصلاح بشهرين أو أقل ← آخر قطعة استُبدلت +20؛
+    /// بانك قبل الإصلاح وبعده ← المشكلة سبقت الإصلاح فآخر قطعة −20.
+    /// </summary>
+    public static void ApplyRepairDate(Diagnosis d, DateTime repair, IEnumerable<DateTimeOffset?> panicTimes)
+    {
+        if (d == null) return;
+        var times = (panicTimes ?? Enumerable.Empty<DateTimeOffset?>()).Where(t => t != null).Select(t => t.Value.LocalDateTime.Date).OrderBy(t => t).ToList();
+        if (times.Count == 0)
+        {
+            d.Evidence.Add(new("تاريخ الإصلاح", repair.ToString("yyyy-MM-dd"), "لا تاريخ في السجل للمقارنة به.", null, "exam"));
+            return;
+        }
+        int before = times.Count(t => t < repair.Date), after = times.Count - before;
+        if (before == 0)
+        {
+            int days = (int)(times[0] - repair.Date).TotalDays;
+            d.Evidence.Add(new("أول بانك بعد الإصلاح", $"بعد {days} يوم من الإصلاح ({repair:yyyy-MM-dd})",
+                "ضمن السجلات المتوفرة لم يظهر البانك قبل الإصلاح — الجهاز يحتفظ بسجلات محدودة، فاسأل الزبون أيضًا.", null, "exam"));
+            if (days <= 60)
+            {
+                if (d.Candidates.Any(c => c.Part == Parts.LastPart)) Bump(d, Parts.LastPart, 20, $"بدأ البانك بعد آخر إصلاح بـ {days} يوم");
+                else Add(d, Parts.LastPart, 55, $"بدأ البانك بعد آخر إصلاح بـ {days} يوم");
+            }
+        }
+        else if (after > 0)
+        {
+            d.Evidence.Add(new("بانك قبل الإصلاح", $"{before} سجل قبل {repair:yyyy-MM-dd} و{after} بعده",
+                "المشكلة كانت موجودة قبل آخر إصلاح: القطعة التي رُكّبت فيه ليست سببها.", null, "exam"));
+            Bump(d, Parts.LastPart, -20, "البانك كان موجودًا قبل آخر إصلاح");
+        }
+        else d.Evidence.Add(new("كل السجلات قبل الإصلاح", repair.ToString("yyyy-MM-dd"), "لا بانك بعد الإصلاح في السجلات المتوفرة — هل ما زالت المشكلة تحدث؟", null, "exam"));
+        Rank(d);
+    }
+
+    /// <summary>
     /// مسار الشحن مقاسًا بالكيبل: يدخل تيار ← آيسي الشحن والمنفذ يعملان (−15 لآيسي الشحن)؛ لا يدخل ← يرتفع آيسي الشحن وفلاتة الشحن وموصل البطارية.
     /// فلاتة الشحن تحمل أيضًا حساسات وميكروفونًا لا يختبرها هذا القياس، فلا تنخفض عند نجاحه.
     /// </summary>
@@ -1045,6 +1080,21 @@ public static class PanicAnalyzer
                     : irregular ? "غير منتظمة — يرجّح طاقة غير مستقرة أو بوردة أو نظام، أكثر من قطعة واحدة"
                     : "متقاربة"));
             }
+        }
+
+        // ---------- المدة من الإقلاع إلى الانهيار ----------
+        var ups = items.Where(x => x.UptimeSeconds is > 0).Select(x => x.UptimeSeconds.Value).OrderBy(x => x).ToList();
+        if (ups.Count >= 3)
+        {
+            double med = ups[ups.Count / 2], spread = ups[^1] - ups[0];
+            bool steady = spread <= Math.Max(15, med * 0.1);
+            bool erratic = ups[^1] / Math.Max(1, ups[0]) > 4;
+            d.Evidence.Add(new("المدة من الإقلاع إلى الانهيار", $"{ups.Count} سجلات: من {Duration(ups[0])} إلى {Duration(ups[^1])}",
+                steady ? "ثابتة: مهلة محددة تنتهي لأن النظام ينتظر قطعة لا ترد (حساس أو خدمة) — ليس عطلًا متقطعًا."
+                : erratic ? "متفاوتة كثيرًا: يرجّح عطلًا متقطعًا (موصل غير محكم، بوردة، طاقة غير مستقرة) أكثر من حساس مفقود."
+                : "متقاربة."));
+            if (steady) Bump(d, Parts.Board, -5, "مهلة ثابتة في كل السجلات — لا تشبه عطل بوردة متقطعًا");
+            else if (erratic) { Bump(d, Parts.Board, 5, "مدد متفاوتة — عطل متقطع"); Bump(d, Parts.BatteryConn, 5, "مدد متفاوتة — موصل غير محكم"); }
         }
 
         // ---------- تغيّر النمط مع الوقت ----------

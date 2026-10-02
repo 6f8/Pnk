@@ -15,6 +15,7 @@ static partial class Program
         Run("تناسق قاعدة المعرفة", KnowledgeConsistency);
         Run("رموز موثّقة من iFixit (الإصدار 6)", VerifiedCodes);
         Run("تصدير الحالات المؤكدة", ExportCases);
+        Run("تاريخ الإصلاح وثبات مدة الانهيار", RepairAndUptime);
         Run("السجلات ونتائجها المتوقعة (.expected)", ExpectedSamples);
         Run("اللقطات: ترتيب الأسباب لم يتغير دون قصد", Snapshots);
         Run("تحمّل: نصوص تالفة وعشوائية", Fuzz);
@@ -483,5 +484,39 @@ static partial class Program
         using var r = new StreamReader(zip.GetEntry("case-0007/case.txt").Open());
         var txt = r.ReadToEnd();
         Check(txt.Contains("القطعة التي أصلحت الجهاز فعلًا: " + Parts.FrontFlex) && txt.Contains("ترتيبها عند كاشف: 1"), "نتيجة الحالة وترتيبها");
+    }
+
+    static void RepairAndUptime()
+    {
+        var f = new CaseFlags { ScreenReplaced = true, RepairDate = new DateTime(2026, 9, 1) };
+        var back = CaseFlags.Decode(f.Encode());
+        Check(back.ScreenReplaced && back.RepairDate == new DateTime(2026, 9, 1) && !back.Liquid, "ترميز تاريخ الإصلاح: " + f.Encode());
+        Check(CaseFlags.Decode("10000").RepairDate == null && CaseFlags.Decode("10000").Liquid, "الترميز القديم بلا تاريخ");
+
+        // سجل iPhone 11 بتاريخ 2026-09-21
+        Diagnosis Fresh() => PanicAnalyzer.Analyze(PanicParser.ParseMany(Sample("prs0_iphone11_ocr.txt"), "x")[0]);
+        var t = Fresh().Log.Time;
+        Check(t?.Date.Year == 2026, "تاريخ السجل: " + t);
+
+        var after = Fresh();
+        PanicAnalyzer.ApplyRepairDate(after, new DateTime(2026, 9, 10), new[] { t });
+        var lp = after.Candidates.FirstOrDefault(c => c.Part == Parts.LastPart);
+        Check(lp != null && lp.Why.Contains("بعد آخر إصلاح"), "أول بانك بعد الإصلاح ← آخر قطعة ترتفع");
+        Check(after.Evidence.Any(e => e.What == "أول بانك بعد الإصلاح" && e.Value.Contains("11 يوم")), "عدد الأيام");
+
+        var both = Fresh();
+        PanicAnalyzer.ApplyRepairDate(both, new DateTime(2026, 9, 15), new[] { t, t?.AddDays(-10) });
+        Check(both.Evidence.Any(e => e.What == "بانك قبل الإصلاح"), "بانك قبل الإصلاح وبعده");
+
+        var none = Fresh();
+        PanicAnalyzer.ApplyRepairDate(none, new DateTime(2026, 9, 15), new DateTimeOffset?[] { null });
+        Check(none.Evidence.Any(e => e.What == "تاريخ الإصلاح"), "بلا تاريخ في السجل");
+
+        // ثلاثة سجلات بمهلة ثابتة ~180 ثانية
+        var items = Enumerable.Range(0, 3).Select(i => { var d = Fresh(); d.UptimeSeconds = 180 + i * 3; return d; }).ToList();
+        var c = PanicAnalyzer.Combine(items);
+        Check(c.Evidence.Any(e => e.What == "المدة من الإقلاع إلى الانهيار" && e.Meaning.StartsWith("ثابتة")), "مهلة ثابتة");
+        var mixed = new[] { 40.0, 200, 900 }.Select(u => { var d = Fresh(); d.UptimeSeconds = u; return d; }).ToList();
+        Check(PanicAnalyzer.Combine(mixed).Evidence.Any(e => e.What == "المدة من الإقلاع إلى الانهيار" && e.Meaning.StartsWith("متفاوتة")), "مدد متفاوتة");
     }
 }

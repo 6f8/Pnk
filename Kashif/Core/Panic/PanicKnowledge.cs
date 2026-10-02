@@ -62,21 +62,29 @@ public sealed record Evidence(string What, string Value, string Meaning, string 
 public sealed class CaseFlags
 {
     public bool Liquid, BatteryReplaced, ChargingFlexReplaced, ScreenReplaced, Dropped;
+    /// <summary>تاريخ آخر إصلاح أو تبديل قطعة (من الفني) — يُقارن بتاريخ أول بانك</summary>
+    public DateTime? RepairDate;
     public bool Any => Liquid || BatteryReplaced || ChargingFlexReplaced || ScreenReplaced || Dropped;
 
     public override string ToString() => string.Join("، ", new[]
     {
         Liquid ? "تعرض لسوائل" : null, BatteryReplaced ? "بطارية مستبدلة" : null, ChargingFlexReplaced ? "فلاتة شحن مستبدلة" : null,
         ScreenReplaced ? "شاشة مستبدلة" : null, Dropped ? "سقوط أو ضربة" : null,
+        RepairDate is DateTime r ? $"آخر إصلاح {r:yyyy-MM-dd}" : null,
     }.Where(x => x != null));
 
-    public string Encode() => $"{(Liquid ? 1 : 0)}{(BatteryReplaced ? 1 : 0)}{(ChargingFlexReplaced ? 1 : 0)}{(ScreenReplaced ? 1 : 0)}{(Dropped ? 1 : 0)}";
+    public string Encode() => $"{(Liquid ? 1 : 0)}{(BatteryReplaced ? 1 : 0)}{(ChargingFlexReplaced ? 1 : 0)}{(ScreenReplaced ? 1 : 0)}{(Dropped ? 1 : 0)}" +
+                              (RepairDate is DateTime r ? "|r=" + r.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) : "");
 
     public static CaseFlags Decode(string s)
     {
         s ??= "";
         bool B(int i) => i < s.Length && s[i] == '1';
-        return new CaseFlags { Liquid = B(0), BatteryReplaced = B(1), ChargingFlexReplaced = B(2), ScreenReplaced = B(3), Dropped = B(4) };
+        DateTime? repair = null;
+        var at = s.IndexOf("|r=", StringComparison.Ordinal);
+        if (at >= 0 && DateTime.TryParseExact(s[(at + 3)..].Split('|')[0], "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var d)) repair = d;
+        return new CaseFlags { Liquid = B(0), BatteryReplaced = B(1), ChargingFlexReplaced = B(2), ScreenReplaced = B(3), Dropped = B(4), RepairDate = repair };
     }
 }
 

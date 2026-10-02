@@ -17,6 +17,8 @@ public class AnalyzeForm : BaseForm
     readonly DataGridView logsGrid = Ui.NewGrid();
     readonly Toggle tLiquid = new() { Text = "تعرض لسوائل", Width = 150 }, tBattery = new() { Text = "بطارية مستبدلة", Width = 160 },
         tFlex = new() { Text = "فلاتة شحن مستبدلة", Width = 180 }, tScreen = new() { Text = "شاشة مستبدلة", Width = 150 }, tDrop = new() { Text = "سقوط أو ضربة", Width = 150 };
+    // تاريخ آخر إصلاح أو تبديل قطعة (اختياري): يُقارن بتاريخ أول بانك في السجلات
+    readonly DateTimePicker repairDate = new() { Format = DateTimePickerFormat.Short, Width = 150, ShowCheckBox = true, Checked = false };
     readonly Toggle tCombine = new() { Text = "تجميع سجلات الجهاز", Width = 190 };
     readonly Toggle tAllEvidence = new() { Text = "كل التفاصيل", Width = 130 };
 
@@ -125,6 +127,9 @@ public class AnalyzeForm : BaseForm
         // (في نافذة «الفحص والخطوات» مع سؤال الفحص — كلاهما يعيد ترتيب الأسباب)
         flags.Controls.Add(new Label { Text = "ما حدث للجهاز:", AutoSize = false, Width = 130, Height = 34, Font = Theme.FS(10), ForeColor = Theme.Text2, TextAlign = ContentAlignment.MiddleLeft });
         foreach (var t in new[] { tLiquid, tBattery, tFlex, tScreen, tDrop }) { t.Margin = new Padding(6, 0, 14, 0); flags.Controls.Add(t); }
+        flags.Controls.Add(new Label { Text = "تاريخ آخر إصلاح:", AutoSize = false, Width = 130, Height = 34, Font = Theme.FS(10), ForeColor = Theme.Text2, TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(6, 0, 4, 0) });
+        repairDate.Margin = new Padding(0, 4, 14, 0);
+        flags.Controls.Add(repairDate);
 
         // ---------- قائمة السجلات (جانبية، تُطوى) ----------
         logsCard = new CardPanel { Dock = DockStyle.Right, Width = 320, Title = "السجلات", IconName = "file-text", Subtitle = "اسحب الملفات إلى هنا", Visible = false };
@@ -202,6 +207,7 @@ public class AnalyzeForm : BaseForm
         tCombine.CheckedChanged += (s, e) => ShowResult();
         tAllEvidence.CheckedChanged += (s, e) => FillEvidence();
         foreach (var t in new[] { tLiquid, tBattery, tFlex, tScreen, tDrop }) t.CheckedChanged += (s, e) => { if (!loading) { dirty = true; Reanalyze(); } };
+        repairDate.ValueChanged += (s, e) => { if (!loading) { dirty = true; ShowResult(); } };
         logsGrid.SelectionChanged += (s, e) => { if (!loading) ShowResult(); };
         interview.Clicked += OnInterview;
         map.PartClicked += ShowCause;
@@ -577,6 +583,7 @@ public class AnalyzeForm : BaseForm
         customerName = phoneText = notesText = fixedPartText = "";
         statusText = PanicStore.Statuses[0];
         foreach (var t in new[] { tLiquid, tBattery, tFlex, tScreen, tDrop }) t.Checked = false;
+        repairDate.Checked = false;
         doneSteps.Clear();
         answers.Clear();
         skipped.Clear();
@@ -598,6 +605,7 @@ public class AnalyzeForm : BaseForm
         statusText = PanicStore.Statuses.Contains(rec.Status) ? rec.Status : PanicStore.Statuses[0];
         tLiquid.Checked = rec.Flags.Liquid; tBattery.Checked = rec.Flags.BatteryReplaced; tFlex.Checked = rec.Flags.ChargingFlexReplaced;
         tScreen.Checked = rec.Flags.ScreenReplaced; tDrop.Checked = rec.Flags.Dropped;
+        if (rec.Flags.RepairDate is DateTime rd) { repairDate.Value = rd; repairDate.Checked = true; } else repairDate.Checked = false;
         answers.AddRange(rec.Answers.Where(a => a.Answer >= 0));
         foreach (var a in rec.Answers.Where(a => a.Answer < 0)) skipped.Add(a.Id);
         foreach (var (source, text) in rec.Logs)
@@ -615,6 +623,7 @@ public class AnalyzeForm : BaseForm
     CaseFlags Flags() => new()
     {
         Liquid = tLiquid.Checked, BatteryReplaced = tBattery.Checked, ChargingFlexReplaced = tFlex.Checked, ScreenReplaced = tScreen.Checked, Dropped = tDrop.Checked,
+        RepairDate = repairDate.Checked ? repairDate.Value.Date : null,
     };
 
     int SelectedIndex() =>
@@ -692,6 +701,7 @@ public class AnalyzeForm : BaseForm
         }
         PanicAnalyzer.ApplyAnswers(shown, answers);
         foreach (var iso in isolations) PanicAnalyzer.ApplyIsolation(shown, iso.Part, iso.Stopped, iso.Duration);
+        if (repairDate.Checked) PanicAnalyzer.ApplyRepairDate(shown, repairDate.Value.Date, shownLogs.Select(l => l.Time));
         // قياسات الجهاز الموصول تُطبَّق فقط إن كان هو نفس موديل السجل المعروض
         var devProduct = device?.Identity?.ProductType ?? "";
         bool sameDevice = device != null && (devProduct == "" || shown.Product == "" || shown.Product == devProduct);
