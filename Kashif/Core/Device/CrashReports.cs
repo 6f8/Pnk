@@ -8,9 +8,24 @@ public sealed record DeviceLog(string Name, string Text);
 /// <summary>نتيجة سحب السجلات: اسم الجهاز وموديله ونظامه، والسجلات</summary>
 /// <param name="Failed">سجلات تعذرت قراءتها</param>
 /// <param name="Older">سجلات أقدم لم تُسحب (يُسحب أحدث <see cref="CrashReports.MaxLogs"/> فقط)</param>
-/// <param name="Battery">صحة البطارية من الجهاز (null إن تعذرت قراءتها)</param>
+/// <param name="Check">هوية الجهاز وبطاريته وشحنه (قراءة مع السحب)</param>
 public sealed record DevicePull(string DeviceName, string ProductType, string Version, string Udid, List<DeviceLog> Logs, int Failed, int Older,
-    BatteryHealth Battery = null);
+    DeviceCheck Check = null)
+{
+    public BatteryHealth Battery => Check?.Battery;
+}
+
+/// <summary>هوية الجهاز من lockdown: الاسم والموديل والنظام والرقم التسلسلي و IMEI</summary>
+public sealed record DeviceIdentity(string Name, string ProductType, string Version, string Serial, string Imei, string Udid)
+{
+    public override string ToString() => string.Join(" · ", new[]
+    {
+        Name, AppleDevices.Name(ProductType), Version == "" ? "" : "iOS " + Version, Serial == "" ? "" : "الرقم التسلسلي " + Serial, Imei == "" ? "" : "IMEI " + Imei,
+    }.Where(x => !string.IsNullOrWhiteSpace(x)));
+}
+
+/// <summary>فحص الجهاز بالكيبل: الهوية، صحة البطارية، حالة الشحن (أي جزء تعذر يكون null)</summary>
+public sealed record DeviceCheck(DeviceIdentity Identity, BatteryHealth Battery, ChargeState Charge);
 
 /// <summary>
 /// سحب سجلات البانك من الآيفون الموصول بالكيبل — نفس ما يفعله iTunes عند المزامنة:
@@ -36,19 +51,18 @@ public static class CrashReports
 
         var pair = mux.ReadPairRecord(dev.Udid);
         string name, product, version;
-        BatteryHealth battery;
+        DeviceCheck check;
         int moverPort, copyPort;
         bool moverSsl, copySsl;
         progress?.Report("فتح جلسة مع الآيفون…");
         using (var ld = new Lockdown(mux.Connect(dev.DeviceId, Lockdown.Port), pair))
         {
             ld.StartSession();
-            name = ld.GetValue("DeviceName");
-            product = ld.GetValue("ProductType");
-            version = ld.GetValue("ProductVersion");
-            progress?.Report("قراءة صحة البطارية…");
-            // قراءة البطارية إضافة: فشلها لا يمنع سحب السجلات
-            try { battery = BatteryReader.Read(ld, mux, dev.DeviceId, pair); } catch (Exception) { battery = null; }
+            progress?.Report("قراءة هوية الجهاز وبطاريته…");
+            check = Inspect(ld, mux, dev, pair);
+            name = check.Identity.Name;
+            product = check.Identity.ProductType;
+            version = check.Identity.Version;
             (moverPort, moverSsl) = ld.StartService(Mover);
             progress?.Report("تجهيز سجلات الأعطال في الآيفون…");
             using (var mover = mux.Connect(dev.DeviceId, moverPort))
@@ -80,21 +94,28 @@ public static class CrashReports
             try { logs.Add(new DeviceLog(Path.GetFileName(chosen[i]), System.Text.Encoding.UTF8.GetString(afc.ReadFile(chosen[i])))); }
             catch (AfcException) { failed++; }
         }
-        return new DevicePull(name, product, version, dev.Udid, logs, failed, pool.Count - chosen.Count, battery);
+        return new DevicePull(name, product, version, dev.Udid, logs, failed, pool.Count - chosen.Count, check);
     }
 
-    /// <summary>صحة البطارية فقط (بلا سحب السجلات): اسم الجهاز وموديله والقراءة</summary>
-    public static (string DeviceName, string ProductType, BatteryHealth Battery) ReadBattery(Usbmux mux = null)
+    /// <summary>من جلسة مفتوحة: الهوية ثم البطارية والشحن (فشل البطارية لا يمنع الباقي)</summary>
+    static DeviceCheck Inspect(Lockdown ld, Usbmux mux, UsbDevice dev, Dictionary<string, object> pair)
+    {
+        var id = new DeviceIdentity(ld.GetValue("DeviceName"), ld.GetValue("ProductType"), ld.GetValue("ProductVersion"),
+            ld.GetValue("SerialNumber"), ld.GetValue("InternationalMobileEquipmentIdentity"), dev.Udid);
+        Dictionary<string, object> reg = null;
+        try { reg = BatteryReader.Query(ld, mux, dev.DeviceId, pair); } catch (Exception) { }
+        return new DeviceCheck(id, BatteryReader.Parse(reg) is { Valid: true } b ? b : null, BatteryReader.ParseCharge(reg));
+    }
+
+    /// <summary>فحص الجهاز بالكيبل بلا سحب السجلات: الهوية والبطارية والشحن</summary>
+    public static DeviceCheck Inspect(Usbmux mux = null)
     {
         mux ??= new Usbmux();
         var dev = mux.ListDevices().FirstOrDefault() ?? throw new DeviceException("لا يوجد آيفون موصول. صِل الجهاز بالكيبل وافتح قفل شاشته، ثم أعد المحاولة.");
         var pair = mux.ReadPairRecord(dev.Udid);
         using var ld = new Lockdown(mux.Connect(dev.DeviceId, Lockdown.Port), pair);
         ld.StartSession();
-        var name = ld.GetValue("DeviceName");
-        var product = ld.GetValue("ProductType");
-        var b = BatteryReader.Read(ld, mux, dev.DeviceId, pair) ?? throw new DeviceException("الآيفون لم يعطِ قراءة البطارية (قد لا تدعمها نسخة iOS هذه).");
-        return (name, product, b);
+        return Inspect(ld, mux, dev, pair);
     }
 
     /// <summary>الملفات في الجذر ومجلداته الفرعية (حتى مستويين، مثل Retired)</summary>

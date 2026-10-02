@@ -43,8 +43,7 @@ public class AnalyzeForm : BaseForm
     readonly HashSet<string> skipped = new();
     // من الجهاز نفسه (لا من السجل): البطارية مقاسة بالكيبل ونتائج اختبار العزل — تُطبَّق على التحليل المعروض
     readonly List<IsolationResult> isolations = new();
-    Kashif.Device.BatteryHealth battery;
-    string batteryProduct = "";
+    Kashif.Device.DeviceCheck device;
     string customerName = "", phoneText = "", notesText = "", statusText = PanicStore.Statuses[0], fixedPartText = "";
     Diagnosis shown;
     List<PanicLog> shownLogs = new();
@@ -105,7 +104,7 @@ public class AnalyzeForm : BaseForm
         foreach (var b in bar.Controls.OfType<ModernButton>()) { b.Height = 40; b.Margin = new Padding(4, 3, 4, 3); }
         moreMenu.Font = Theme.F(10.5f);
         moreMenu.Items.Add("اختبار العزل (وضع الطاولة)", null, (s, e) => ShowIsolation());
-        moreMenu.Items.Add("صحة البطارية من الآيفون", null, (s, e) => ReadBatteryFromDevice());
+        moreMenu.Items.Add("فحص الجهاز بالكيبل (الهوية، البطارية، الشحن)", null, (s, e) => InspectDevice());
         moreMenu.Items.Add(new ToolStripSeparator());
         moreMenu.Items.Add("نص السجل", null, (s, e) => ShowRaw(null));
         var logsItem = new ToolStripMenuItem("إظهار قائمة السجلات", null, (s, e) => { logsToggledByUser = true; SetLogsVisible(!logsCard.Visible); });
@@ -431,7 +430,7 @@ public class AnalyzeForm : BaseForm
         }
         if (IsDisposed) return;
         var device = string.Join(" · ", new[] { pull.DeviceName, AppleDevices.Name(pull.ProductType), pull.Version == "" ? "" : "iOS " + pull.Version }.Where(x => !string.IsNullOrWhiteSpace(x)));
-        if (pull.Battery is { Valid: true }) SetBattery(pull.Battery, pull.ProductType);
+        if (pull.Check != null) SetDevice(pull.Check);
         if (pull.Logs.Count == 0)
         {
             Dialogs.Message($"{device}\n\nلا توجد سجلات بانك في الجهاز.\nإن كان الجهاز يعيد التشغيل فعلًا، انتظر حتى يحدث البانك مرة ثم أعد السحب.", "السحب من الآيفون", Tone.Info);
@@ -441,40 +440,57 @@ public class AnalyzeForm : BaseForm
         var found = pull.Logs.SelectMany(l => PanicParser.ParseMany(l.Text, l.Name)).ToList();
         Merge(found);
         var notes = new List<string>();
+        if (pull.Check?.Identity is { } ident) notes.Add(ident.ToString());
         notes.Add(pull.Battery is { Valid: true } ? "البطارية (مقاسة بالكيبل): " + pull.Battery : "تعذرت قراءة صحة البطارية من هذا الجهاز.");
+        if (pull.Check?.Charge is { } ch) notes.Add("الشحن: " + ch.Verdict);
         if (pull.Older > 0) notes.Add($"سُحب أحدث {pull.Logs.Count} سجل، وفي الجهاز {pull.Older} سجلات أقدم لم تُسحب.");
         if (pull.Failed > 0) notes.Add($"تعذرت قراءة {pull.Failed} سجل.");
         Toast.Show($"سُحب {pull.Logs.Count} سجل من {device}");
         Dialogs.Message(string.Join("\n", notes), "السحب من الآيفون", Tone.Info);
     }
 
-    /// <summary>البطارية مقاسة من الجهاز: تُحفظ في الملاحظات (تبقى مع الفحص) وتُطبَّق على الترتيب</summary>
-    void SetBattery(Kashif.Device.BatteryHealth b, string product)
+    /// <summary>قياسات الجهاز الموصول: تُحفظ في الملاحظات (تبقى مع الفحص) وتُطبَّق على الترتيب</summary>
+    void SetDevice(Kashif.Device.DeviceCheck c)
     {
-        battery = b;
-        batteryProduct = product ?? "";
-        var line = "البطارية (مقاسة بالكيبل): " + b;
-        if (!notesText.Contains(line, StringComparison.Ordinal)) notesText = (notesText.TrimEnd() + "\n" + line).Trim();
+        device = c;
+        var lines = new List<string>();
+        if (c.Identity != null) lines.Add("الجهاز الموصول: " + c.Identity);
+        if (c.Battery is { Valid: true }) lines.Add("البطارية (مقاسة بالكيبل): " + c.Battery);
+        if (c.Charge != null) lines.Add("الشحن (مقاسًا بالكيبل): " + c.Charge.Verdict);
+        foreach (var line in lines)
+            if (!notesText.Contains(line, StringComparison.Ordinal)) notesText = (notesText.TrimEnd() + "\n" + line).Trim();
         dirty = true;
     }
 
-    async void ReadBatteryFromDevice()
+    async void InspectDevice()
     {
         if (busy) return;
         busy = true;
         UpdateButtons();
-        (string Name, string Product, Kashif.Device.BatteryHealth Battery) r;
-        try { r = await Task.Run(() => Kashif.Device.CrashReports.ReadBattery()); }
-        catch (Kashif.Device.DeviceException ex) { Dialogs.Warn(ex.Message, "صحة البطارية"); return; }
-        catch (Exception ex) { Dialogs.Warn("تعذرت قراءة البطارية: " + ex.Message, "صحة البطارية"); return; }
+        Kashif.Device.DeviceCheck c;
+        try { c = await Task.Run(() => Kashif.Device.CrashReports.Inspect()); }
+        catch (Kashif.Device.DeviceException ex) { Dialogs.Warn(ex.Message, "فحص الجهاز بالكيبل"); return; }
+        catch (Exception ex) { Dialogs.Warn("تعذر فحص الجهاز: " + ex.Message, "فحص الجهاز بالكيبل"); return; }
         finally { busy = false; if (!IsDisposed) UpdateButtons(); }
         if (IsDisposed) return;
-        SetBattery(r.Battery, r.Product);
+        SetDevice(c);
         ShowResult();
-        var verdict = r.Battery.Percent >= 85 && r.Battery.CycleCount < 1000 ? "سليمة: لا تبدّلها قبل اختبار العزل."
-            : r.Battery.Percent < 80 ? "سعتها منخفضة: تستحق التبديل لأجل عمر الشحن، لكنها وحدها لا تفسّر بانكًا يذكر قطعة أخرى." : "مقبولة.";
-        Dialogs.Message($"{r.Name} · {AppleDevices.Name(r.Product)}\n\n{r.Battery}\n\n{verdict}\n\nالنسبة محسوبة من السعة الحالية والأصلية التي يسجلها الجهاز، وقد تختلف ببضع درجات عن «السعة القصوى» في الإعدادات.",
-            "صحة البطارية", Tone.Info);
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine(c.Identity?.ToString());
+        if (shown != null && c.Identity?.ProductType is { Length: > 0 } p && shown.Product != "" && shown.Product != p)
+            sb.AppendLine($"\nتنبيه: السجل المعروض من {AppleDevices.Name(shown.Product)} لكن الموصول {AppleDevices.Name(p)} — هل هو نفس الجهاز؟ قياساته لا تُطبَّق على هذا السجل.");
+        sb.AppendLine();
+        if (c.Battery is { Valid: true } b)
+        {
+            sb.AppendLine("البطارية: " + b);
+            sb.AppendLine(b.Percent >= 85 && b.CycleCount < 1000 ? "سليمة: لا تبدّلها قبل اختبار العزل."
+                : b.Percent < 80 ? "سعتها منخفضة: تستحق التبديل لأجل عمر الشحن، لكنها وحدها لا تفسّر بانكًا يذكر قطعة أخرى." : "مقبولة.");
+        }
+        else sb.AppendLine("البطارية: لم يعطِ الجهاز قراءة.");
+        sb.AppendLine();
+        sb.AppendLine(c.Charge != null ? "الشحن: " + c.Charge.Verdict + "\n(" + c.Charge + ")" : "الشحن: لم يعطِ الجهاز قراءة.");
+        sb.AppendLine("\nنسبة البطارية من السعة الحالية والأصلية التي يسجلها الجهاز، وقد تختلف ببضع درجات عن «السعة القصوى» في الإعدادات.");
+        Dialogs.Message(sb.ToString().Trim(), "فحص الجهاز بالكيبل", Tone.Info);
     }
 
     /// <summary>وضع الطاولة: اختبار العزل بعدّاد، ونتيجته تعيد ترتيب الأسباب وتُحفظ في الملاحظات</summary>
@@ -561,8 +577,7 @@ public class AnalyzeForm : BaseForm
         answers.Clear();
         skipped.Clear();
         isolations.Clear();
-        battery = null;
-        batteryProduct = "";
+        device = null;
         logsToggledByUser = false;
         SetLogsVisible(false);
         loading = false;
@@ -673,12 +688,20 @@ public class AnalyzeForm : BaseForm
         }
         PanicAnalyzer.ApplyAnswers(shown, answers);
         foreach (var iso in isolations) PanicAnalyzer.ApplyIsolation(shown, iso.Part, iso.Stopped, iso.Duration);
-        if (battery is { Valid: true } && (batteryProduct == "" || shown.Product == "" || shown.Product == batteryProduct))
-            PanicAnalyzer.ApplyBattery(shown, battery.Percent, battery.CycleCount);
+        // قياسات الجهاز الموصول تُطبَّق فقط إن كان هو نفس موديل السجل المعروض
+        var devProduct = device?.Identity?.ProductType ?? "";
+        bool sameDevice = device != null && (devProduct == "" || shown.Product == "" || shown.Product == devProduct);
+        if (sameDevice)
+        {
+            if (device.Battery is { Valid: true } bat) PanicAnalyzer.ApplyBattery(shown, bat.Percent, bat.CycleCount);
+            if (device.Charge is { } chg) PanicAnalyzer.ApplyCharging(shown, chg.PathWorks, chg.Verdict);
+        }
 
         var extra = new List<string>();
         int devices = groups.Distinct().Count();
         if (devices > 1) extra.Add($"في القائمة سجلات من {devices} أجهزة مختلفة — يُعرض تحليل جهاز السجل المحدد فقط.");
+        if (device != null && !sameDevice)
+            extra.Add($"الآيفون الموصول ({AppleDevices.Name(devProduct)}) ليس موديل هذا السجل ({AppleDevices.Name(shown.Product)}) — قياساته بالكيبل لم تُطبَّق.");
         if (!tCombine.Checked && group.Count > 1) extra.Add($"لهذا الجهاز {group.Count} سجلات — فعّل «تجميع سجلات الجهاز» لتحليلها معًا.");
         try
         {

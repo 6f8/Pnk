@@ -399,6 +399,26 @@ public static class PanicAnalyzer
     }
 
     /// <summary>
+    /// مسار الشحن مقاسًا بالكيبل: يدخل تيار ← آيسي الشحن والمنفذ يعملان (−15 لآيسي الشحن)؛ لا يدخل ← يرتفع آيسي الشحن وفلاتة الشحن وموصل البطارية.
+    /// فلاتة الشحن تحمل أيضًا حساسات وميكروفونًا لا يختبرها هذا القياس، فلا تنخفض عند نجاحه.
+    /// </summary>
+    public static void ApplyCharging(Diagnosis d, bool? works, string verdict)
+    {
+        if (d == null || string.IsNullOrWhiteSpace(verdict)) return;
+        d.Evidence.Add(new("الشحن مقاسًا بالكيبل", verdict,
+            works == true ? "الشحن نفسه سليم. فلاتة الشحن تحمل أيضًا حساسات وميكروفونًا لم يختبرها هذا القياس." : works == false ? "مسار الشحن لا يعمل كما يجب." : "لا حكم الآن.",
+            null, "exam"));
+        if (works == true) Bump(d, Parts.ChargeIc, -15, "الشحن يعمل بالقياس");
+        else if (works == false)
+        {
+            Bump(d, Parts.ChargeIc, 15, "الشحن لا يعمل بالقياس");
+            Bump(d, Parts.ChargingFlex, 10, "الشحن لا يعمل بالقياس");
+            Bump(d, Parts.BatteryConn, 10, "الشحن لا يعمل بالقياس");
+        }
+        Rank(d);
+    }
+
+    /// <summary>
     /// البطارية مقاسة من الجهاز بالكيبل (لا من السجل): دليل عملي. سليمة (85% فأكثر وأقل من 1000 دورة) ← تنخفض درجتها بوضوح؛
     /// ضعيفة (أقل من 80%) ← ترتفع قليلًا فقط، لأن ضعف السعة يسبب انطفاءً مفاجئًا لكنه وحده لا يفسّر انهيارًا يذكر حساسًا آخر.
     /// </summary>

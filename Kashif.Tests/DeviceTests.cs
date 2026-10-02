@@ -22,6 +22,7 @@ static partial class Program
         Run("الآيفون: TLS بشهادة سجل الاقتران (PEM)", PairTls);
         Run("البطارية المقاسة واختبار العزل في الترتيب", BatteryAndIsolation);
         Run("مراقبة إعادة التشغيل بالكيبل", RebootWatching);
+        Run("الشحن مقاسًا بالكيبل", ChargingChecks);
         Run("التنبيه بنسخة جديدة", UpdateCheck);
     }
 
@@ -83,8 +84,10 @@ static partial class Program
         Check(pull.Failed == 0 && pull.Older == 0, $"failed={pull.Failed} older={pull.Older}");
         Check(pull.Battery is { Valid: true, Percent: 90, CycleCount: 412, DesignMah: 4352, FullMah: 3918 } && pull.Battery.TemperatureC == 29.5,
             "البطارية من خدمة التشخيص: " + pull.Battery);
-        var only = CrashReports.ReadBattery(new Usbmux("127.0.0.1", fake.Port));
-        Check(only.Battery?.Percent == 90 && only.ProductType == "iPhone14,3", "قراءة البطارية وحدها");
+        Check(pull.Check?.Identity is { Serial: "F2LXK0Q1ABCD", Imei: "356000000000001", ProductType: "iPhone14,3" }, "هوية الجهاز: " + pull.Check?.Identity);
+        Check(pull.Check?.Charge is { External: true, AmperageMa: 850, VoltageMv: 4120, Watts: 5, Percent: 64, PathWorks: true }, "الشحن: " + pull.Check?.Charge);
+        var only = CrashReports.Inspect(new Usbmux("127.0.0.1", fake.Port));
+        Check(only.Battery?.Percent == 90 && only.Identity.ProductType == "iPhone14,3" && only.Charge?.PathWorks == true, "فحص الجهاز بلا سحب");
     }
 
     static void DeviceErrors()
@@ -149,6 +152,27 @@ static partial class Program
         Check(!Updates.IsNewer(r, "1.0.12+abc"), "نفس النسخة");
         Check(Updates.Parse("{\"message\":\"Not Found\"}") == null && Updates.Parse("not json") == null, "رد 404 أو نص تالف ← لا شيء");
         Check(!Updates.IsNewer(null, "1.0.0"), "null ← لا تنبيه");
+    }
+
+    static void ChargingChecks()
+    {
+        ChargeState C(bool ext, long amp, long pct) => BatteryReader.ParseCharge(new() { ["ExternalConnected"] = ext, ["InstantAmperage"] = amp, ["CurrentCapacity"] = pct });
+        Check(C(true, 900, 50).PathWorks == true, "يدخل تيار ← يعمل");
+        Check(C(false, -300, 50).PathWorks == false && C(false, -300, 50).Verdict.Contains("منفذ الشحن"), "لا مصدر طاقة ← المنفذ أو الفلاتة");
+        Check(C(true, 0, 40).PathWorks == false && C(true, 0, 40).Verdict.Contains("آيسي الشحن"), "مصدر بلا تيار ← آيسي الشحن");
+        Check(C(true, 0, 100).PathWorks == null, "ممتلئة ← لا حكم");
+        Check(C(true, 4294966996, 50).AmperageMa == -300, "تيار سالب مكتوب بلا إشارة (32 بت)");
+        Check(C(true, unchecked((long)18446744073709551316UL), 50).AmperageMa == -300, "تيار سالب (64 بت)");
+
+        Diagnosis Fresh() => PanicAnalyzer.Analyze(PanicParser.ParseMany(Sample("prs0_iphone11_ocr.txt"), "x")[0]);
+        var ok = Fresh();
+        int flex = ok.Candidates.First(c => c.Part == Parts.ChargingFlex).Score;
+        PanicAnalyzer.ApplyCharging(ok, true, C(true, 900, 50).Verdict);
+        Check(ok.Candidates.First(c => c.Part == Parts.ChargingFlex).Score == flex && ok.TopPart == Parts.ChargingFlex,
+            "الشحن يعمل لا يبرّئ فلاتة الشحن من حساس Prs0");
+        var bad = Fresh();
+        PanicAnalyzer.ApplyCharging(bad, false, C(true, 0, 40).Verdict);
+        Check(bad.Candidates.First(c => c.Part == Parts.ChargingFlex).Score == Math.Min(99, flex + 10), "لا يشحن ← فلاتة الشحن +10");
     }
 
     static void RebootWatching()
@@ -358,7 +382,11 @@ static partial class Program
                         else { r["SessionID"] = "S1"; r["EnableSessionSSL"] = false; }
                         break;
                     case "GetValue":
-                        r["Value"] = req.Str("Key") switch { "DeviceName" => "iPhone يوسف", "ProductType" => "iPhone14,3", "ProductVersion" => "26.0", _ => "" };
+                        r["Value"] = req.Str("Key") switch
+                        {
+                            "DeviceName" => "iPhone يوسف", "ProductType" => "iPhone14,3", "ProductVersion" => "26.0",
+                            "SerialNumber" => "F2LXK0Q1ABCD", "InternationalMobileEquipmentIdentity" => "356000000000001", _ => "",
+                        };
                         break;
                     case "StartService":
                         r["Port"] = req.Str("Service") switch
@@ -395,6 +423,8 @@ static partial class Program
                             ["IORegistry"] = new Dictionary<string, object>
                             {
                                 ["CycleCount"] = 412L, ["NominalChargeCapacity"] = 3918L, ["Temperature"] = 2950L,
+                                ["ExternalConnected"] = true, ["IsCharging"] = true, ["InstantAmperage"] = 850L, ["Voltage"] = 4120L, ["CurrentCapacity"] = 64L,
+                                ["AdapterDetails"] = new Dictionary<string, object> { ["Watts"] = 5L, ["Description"] = "usb host" },
                                 ["BatteryData"] = new Dictionary<string, object> { ["DesignCapacity"] = 4352L },
                             },
                         },
