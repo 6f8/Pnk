@@ -3,7 +3,8 @@ using Kashif.Device;
 namespace Kashif;
 
 /// <summary>نتيجة اختبار عزل واحد</summary>
-public sealed record IsolationResult(string Part, bool Stopped, string Duration);
+/// <param name="LiveErrors">أسطر خطأ في السجل المباشر خلال الاختبار (-1 = لم يُراقب السجل)</param>
+public sealed record IsolationResult(string Part, bool Stopped, string Duration, int LiveErrors = -1);
 
 /// <summary>
 /// وضع الطاولة (الواجهة 5): اختبار العزل بشاشة داكنة وعدّاد كبير.
@@ -25,6 +26,10 @@ public class IsolationForm : BaseForm
     readonly ModernButton bStart, bStayed, bRebooted, bClose;
     readonly TimeSpan limit;
     bool polling;
+    // السجل المباشر أثناء الاختبار: هل ما زالت أخطاء الحساسات تظهر بعد فصل القطعة؟
+    LiveSession live;
+    DateTime started;
+    string liveNote = "";
 
     public List<IsolationResult> Results { get; } = new();
 
@@ -75,7 +80,7 @@ public class IsolationForm : BaseForm
         bClose.Click += (s, e) => Close();
         timer.Tick += (s, e) => Tick();
         KeyDown += (s, e) => { if (e.KeyCode == Keys.Escape) Close(); };
-        FormClosing += (s, e) => { watch.Stop(DateTime.Now); timer.Stop(); };
+        FormClosing += (s, e) => { watch.Stop(DateTime.Now); timer.Stop(); live?.Dispose(); };
     }
 
     void Idle()
@@ -100,6 +105,16 @@ public class IsolationForm : BaseForm
         bStayed.Visible = bRebooted.Visible = true;
         part.Enabled = false;
         ring.State = RebootWatch.State.Running;
+        started = DateTime.Now;
+        liveNote = "";
+        live?.Dispose();
+        live = null;
+        if (watch.Watching)
+        {
+            live = new LiveSession();
+            live.Flagged += f => liveNote = $"{f.Category}: {Short(f.Line)}";
+            live.Start();
+        }
         timer.Start();
     }
 
@@ -113,6 +128,12 @@ public class IsolationForm : BaseForm
         if (IsDisposed) return;
         ring.Elapsed = watch.Elapsed(DateTime.Now);
         ring.Invalidate();
+        if (live != null && st == RebootWatch.State.Running)
+        {
+            int n = live.CountSince(started);
+            status.Text = "يراقب كاشف الآيفون بالكيبل: إن أعاد التشغيل سيلاحظ ذلك وحده. لا تفصل الكيبل أثناء الاختبار.\n" +
+                (n == 0 ? "السجل المباشر: لا أخطاء حساسات منذ البدء." : $"السجل المباشر: {n} سطر خطأ منذ البدء — آخرها {liveNote}");
+        }
         if (st != RebootWatch.State.Running) Done(st);
     }
 
@@ -122,7 +143,9 @@ public class IsolationForm : BaseForm
         timer.Stop();
         bool stopped = st == RebootWatch.State.Passed;
         var dur = RebootWatch.Clock(watch.Result);
-        Results.Add(new IsolationResult(part.Text.Trim(), stopped, dur));
+        int liveErrors = live != null ? live.CountSince(started) : -1;
+        live?.Stop();
+        Results.Add(new IsolationResult(part.Text.Trim(), stopped, dur, liveErrors));
         ring.State = st;
         ring.Elapsed = watch.Result;
         ring.Invalidate();
@@ -131,12 +154,15 @@ public class IsolationForm : BaseForm
             ? $"«{part.Text.Trim()}» هي السبب على الأرجح. ركّب قطعة سليمة وأعد الاختبار للتأكيد قبل الشراء."
             : $"«{part.Text.Trim()}» ليست السبب. أرجعها وافصل القطعة التالية ثم ابدأ اختبارًا جديدًا.";
         if (watch.Watching && st == RebootWatch.State.Rebooted) status.Text += "\n(لوحظ انقطاع الآيفون عن الكيبل — إن فصلته أنت فأعد الاختبار.)";
+        if (liveErrors >= 0) status.Text += liveErrors == 0 ? "\nالسجل المباشر: لا أخطاء حساسات طوال الاختبار." : $"\nالسجل المباشر: {liveErrors} سطر خطأ خلال الاختبار.";
         bStayed.Visible = bRebooted.Visible = false;
         bStart.Text = "اختبار جديد";
         bStart.Visible = true;
         part.Enabled = true;
         if (!stopped && part.SelectedIndex >= 0 && part.SelectedIndex + 1 < part.Items.Count) part.SelectedIndex++;
     }
+
+    static string Short(string line) => line.Length > 90 ? line[..90] + "…" : line;
 
     protected override void Dispose(bool disposing)
     {

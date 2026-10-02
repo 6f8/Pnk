@@ -104,6 +104,7 @@ public class AnalyzeForm : BaseForm
         foreach (var b in bar.Controls.OfType<ModernButton>()) { b.Height = 40; b.Margin = new Padding(4, 3, 4, 3); }
         moreMenu.Font = Theme.F(10.5f);
         moreMenu.Items.Add("اختبار العزل (وضع الطاولة)", null, (s, e) => ShowIsolation());
+        moreMenu.Items.Add("السجل المباشر من الآيفون", null, (s, e) => { using var f = new LiveLogForm(); f.ShowDialog(Form.ActiveForm ?? FindForm()); });
         moreMenu.Items.Add("فحص الجهاز بالكيبل (الهوية، البطارية، الشحن)", null, (s, e) => InspectDevice());
         moreMenu.Items.Add(new ToolStripSeparator());
         moreMenu.Items.Add("نص السجل", null, (s, e) => ShowRaw(null));
@@ -271,6 +272,8 @@ public class AnalyzeForm : BaseForm
         dlg.AddButton("إغلاق", DialogResult.Cancel, BtnKind.Secondary);
         var bIso = dlg.AddButton("اختبار العزل", DialogResult.None, BtnKind.Primary, "clock");
         bIso.Click += (s, e) => ShowIsolation();
+        var bLive = dlg.AddButton("السجل المباشر", DialogResult.None, BtnKind.Secondary, "activity");
+        bLive.Click += (s, e) => { using var f = new LiveLogForm(); f.ShowDialog(dlg); };
         try { dlg.ShowModal(); }
         finally
         {
@@ -503,7 +506,8 @@ public class AnalyzeForm : BaseForm
         if (f.Results.Count == 0) return;
         isolations.AddRange(f.Results);
         foreach (var r in f.Results)
-            notesText = (notesText.TrimEnd() + $"\nاختبار العزل: فُصلت {r.Part} — {(r.Stopped ? "بقي يعمل" : "أعاد التشغيل")} ({r.Duration})").Trim();
+            notesText = (notesText.TrimEnd() + $"\nاختبار العزل: فُصلت {r.Part} — {(r.Stopped ? "بقي يعمل" : "أعاد التشغيل")} ({r.Duration})" +
+                (r.LiveErrors >= 0 ? $" — السجل المباشر: {r.LiveErrors} سطر خطأ" : "")).Trim();
         dirty = true;
         ShowResult();
         Toast.Show(f.Results[^1].Stopped ? $"«{f.Results[^1].Part}» ارتفعت إلى أعلى الأسباب" : $"«{f.Results[^1].Part}» انخفضت — ليست السبب");

@@ -23,6 +23,7 @@ static partial class Program
         Run("البطارية المقاسة واختبار العزل في الترتيب", BatteryAndIsolation);
         Run("مراقبة إعادة التشغيل بالكيبل", RebootWatching);
         Run("الشحن مقاسًا بالكيبل", ChargingChecks);
+        Run("السجل المباشر من الآيفون", LiveSyslog);
         Run("التنبيه بنسخة جديدة", UpdateCheck);
     }
 
@@ -152,6 +153,30 @@ static partial class Program
         Check(!Updates.IsNewer(r, "1.0.12+abc"), "نفس النسخة");
         Check(Updates.Parse("{\"message\":\"Not Found\"}") == null && Updates.Parse("not json") == null, "رد 404 أو نص تالف ← لا شيء");
         Check(!Updates.IsNewer(null, "1.0.0"), "null ← لا تنبيه");
+    }
+
+    static void LiveSyslog()
+    {
+        var t = DateTime.Now;
+        Check(LiveLog.Classify("thermalmonitord[93] <Error>: Missing sensor(s): Prs0", t) is { Category: "حساس", Sensor: "Prs0" }, "حساس مفقود مع رمزه");
+        Check(LiveLog.Classify("kernel: i2c2: _checkBusStatus SCL is stuck low", t)?.Category == "I2C", "I2C عالق");
+        Check(LiveLog.Classify("SpringBoard[55] <Notice>: hello", t) == null, "سطر عادي لا يُعلَّم");
+        Check(LiveLog.Classify("", t) == null, "سطر فارغ");
+
+        using var fake = new FakeIPhone(new());
+        using var live = new LiveSession();
+        var lines = new List<string>();
+        var done = new ManualResetEventSlim();
+        string endError = "unset";
+        live.Line += l => { lock (lines) lines.Add(l); };
+        live.Ended += e => { endError = e; done.Set(); };
+        live.Start(new Usbmux("127.0.0.1", fake.Port));
+        Check(done.Wait(10000), "انتهت الجلسة عند إغلاق الجهاز للاتصال");
+        Check(endError == null, "انقطاع عادي بلا خطأ: " + endError);
+        Check(lines.Count == 3 && lines[2].EndsWith("SMC BSC failure timeout"), "الرسالة المقسومة بين دفعتين تُجمع: " + string.Join(" | ", lines));
+        var flags = live.Flags;
+        Check(flags.Count == 2 && flags[0].Sensor == "Prs0,mic1" && flags[1].Category == "SMC", "الأخطاء: " + string.Join(", ", flags.Select(f => f.Category + ":" + f.Sensor)));
+        Check(live.DeviceName == "iPhone يوسف", "اسم الجهاز");
     }
 
     static void ChargingChecks()
@@ -285,7 +310,7 @@ static partial class Program
     /// <summary>آيفون وهمي: usbmuxd على منفذ محلي، وخلفه lockdownd وخدمتا سجلات الأعطال (بلا TLS)</summary>
     sealed class FakeIPhone : IDisposable
     {
-        const int MoverPort = 1001, CopyPort = 1002, DiagPort = 1003;
+        const int MoverPort = 1001, CopyPort = 1002, DiagPort = 1003, SyslogPort = 1004;
         readonly TcpListener listener = new(IPAddress.Loopback, 0);
         readonly Dictionary<string, string> files;
         readonly int devices;
@@ -360,6 +385,15 @@ static partial class Program
                     else if (port == MoverPort) { s.Write(Encoding.ASCII.GetBytes("ping")); MoverPinged = true; }
                     else if (port == CopyPort) ServeAfc(s);
                     else if (port == DiagPort) ServeDiagnostics(s);
+                    else if (port == SyslogPort)
+                    {
+                        // رسائل منتهية بصفر، وآخرها مقسوم بين دفعتين
+                        s.Write(Encoding.UTF8.GetBytes("Oct  2 21:00:01 iPhone SpringBoard[55] <Notice>: hello\0" +
+                            "Oct  2 21:00:02 iPhone thermalmonitord[93] <Error>: Missing sensor(s): Prs0 mic1\0Oct  2 21:00:03 iPhone kernel[0] <Notice>: AppleSMC: SMC "));
+                        s.Flush();
+                        Thread.Sleep(50);
+                        s.Write(Encoding.UTF8.GetBytes("BSC failure timeout\0"));
+                    }
                     break;
             }
         }
@@ -391,7 +425,8 @@ static partial class Program
                     case "StartService":
                         r["Port"] = req.Str("Service") switch
                         {
-                            CrashReports.Mover => (long)MoverPort, CrashReports.Copy => (long)CopyPort, BatteryReader.Service => (long)DiagPort, _ => 0L,
+                            CrashReports.Mover => (long)MoverPort, CrashReports.Copy => (long)CopyPort, BatteryReader.Service => (long)DiagPort,
+                            LiveSession.Service => (long)SyslogPort, _ => 0L,
                         };
                         r["EnableServiceSSL"] = false;
                         break;
