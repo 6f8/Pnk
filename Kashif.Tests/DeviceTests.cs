@@ -1,0 +1,360 @@
+using System.Buffers.Binary;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using Kashif.Device;
+
+namespace Kashif.Tests;
+
+/// <summary>
+/// سحب السجلات من الآيفون: plist (XML والثنائي)، وحزم AFC، والمسار كاملًا على آيفون وهمي
+/// (usbmuxd ← lockdownd ← crashreportmover ← crashreportcopymobile) يعمل على منفذ محلي.
+/// ما لا يُختبر هنا: TLS مع جهاز حقيقي — يُجرَّب على آيفون فعلي.
+/// </summary>
+static partial class Program
+{
+    static void RunDevice()
+    {
+        Run("الآيفون: plist بصيغتي XML والثنائية", PlistFormats);
+        Run("الآيفون: حزم AFC", AfcPackets);
+        Run("الآيفون: سحب السجلات من جهاز وهمي", PullFromFakeDevice);
+        Run("الآيفون: رسائل الأخطاء المفهومة", DeviceErrors);
+        Run("الآيفون: TLS بشهادة سجل الاقتران (PEM)", PairTls);
+    }
+
+    static void PlistFormats()
+    {
+        var src = new Dictionary<string, object>
+        {
+            ["MessageType"] = "Connect", ["DeviceID"] = 7L, ["Ok"] = true, ["Data"] = new byte[] { 1, 2, 250 },
+            ["List"] = new List<object> { "a&b<c>", 3L }, ["Nested"] = new Dictionary<string, object> { ["x"] = -5L },
+        };
+        var back = Plist.ParseDict(Plist.ToXml(src));
+        Check(back.Str("MessageType") == "Connect" && back.Long("DeviceID") == 7 && back.Bool("Ok"), "قيم بسيطة");
+        Check(back.Data("Data").SequenceEqual(new byte[] { 1, 2, 250 }), "data");
+        Check(back["List"] is List<object> l && (string)l[0] == "a&b<c>" && (long)l[1] == 3, "array مع رموز XML");
+        Check(((Dictionary<string, object>)back["Nested"]).Long("x") == -5, "قاموس داخل قاموس");
+
+        var bin = BinaryPlist(new() { ["HostID"] = "ABC-123", ["SystemBUID"] = "BUID-9", ["Name"] = "آيفون" });
+        var d = Plist.ParseDict(bin);
+        Check(d.Str("HostID") == "ABC-123" && d.Str("SystemBUID") == "BUID-9", "bplist: نصوص ASCII");
+        Check(d.Str("Name") == "آيفون", "bplist: نص UTF-16");
+
+        bool threw = false;
+        try { Plist.Parse(Encoding.ASCII.GetBytes("bplist00 broken")); } catch (FormatException) { threw = true; }
+        Check(threw, "bplist تالف يُرفض بخطأ واضح");
+    }
+
+    static void AfcPackets()
+    {
+        var p = Afc.Packet(Afc.OpReadDir, 5, Encoding.UTF8.GetBytes("/\0"), new byte[] { 9, 9 });
+        Check(p.Length == Afc.HeaderSize + 2 + 2, "الطول");
+        Check(Encoding.ASCII.GetString(p, 0, 8) == "CFA6LPAA", "التوقيع");
+        Check(BinaryPrimitives.ReadUInt64LittleEndian(p.AsSpan(16)) == Afc.HeaderSize + 2, "طول الرأس مع المعاملات");
+        var r = Afc.Read(new MemoryStream(p));
+        Check(r.Op == Afc.OpReadDir && r.Header.Length == 2 && r.Payload.SequenceEqual(new byte[] { 9, 9 }), "القراءة تطابق الكتابة");
+        Check(CrashReports.IsPanic("panic-full-2026-09-26-205345.0002.ips") && !CrashReports.IsPanic("JetsamEvent-2026.ips"), "تمييز سجلات البانك");
+    }
+
+    static void PullFromFakeDevice()
+    {
+        var big = new string('x', 150_000);   // أكبر من قطعة القراءة (64 كيلوبايت)
+        var files = new Dictionary<string, string>
+        {
+            ["/panic-full-2026-09-26-205345.ips"] = "{\"bug_type\":\"210\"}\npanic newest " + big,
+            ["/panic-full-2026-09-20-101010.ips"] = "panic older",
+            ["/panic-base-2026-09-26-205345.ips"] = "base",
+            ["/JetsamEvent-2026.ips"] = "not a panic",
+            ["/Retired/panic-full-2025-01-01-000000.ips"] = "retired panic",
+        };
+        using var fake = new FakeIPhone(files);
+        var pull = CrashReports.Pull(new Usbmux("127.0.0.1", fake.Port));
+        Check(pull.DeviceName == "iPhone يوسف" && pull.ProductType == "iPhone14,3" && pull.Version == "26.0", $"معلومات الجهاز: {pull.DeviceName} {pull.ProductType} {pull.Version}");
+        Check(pull.Udid == "00008110-000A1B2C3D4E5F6A", "UDID");
+        var names = pull.Logs.Select(l => l.Name).ToList();
+        Check(names.SequenceEqual(new[] { "panic-full-2026-09-26-205345.ips", "panic-full-2026-09-20-101010.ips", "panic-full-2025-01-01-000000.ips" }),
+            "panic-full فقط، الأحدث أولًا، ومن مجلد Retired أيضًا: " + string.Join(", ", names));
+        Check(pull.Logs[0].Text.EndsWith(big) && pull.Logs[0].Text.Length == files["/panic-full-2026-09-26-205345.ips"].Length, "ملف أكبر من قطعة القراءة يُقرأ كاملًا");
+        Check(fake.MoverPinged, "خدمة نقل السجلات شُغّلت");
+        Check(fake.Writes == 0, "لا كتابة ولا حذف في الجهاز");
+        Check(pull.Failed == 0 && pull.Older == 0, $"failed={pull.Failed} older={pull.Older}");
+    }
+
+    static void DeviceErrors()
+    {
+        // لا خدمة Apple على المنفذ
+        var l = new TcpListener(IPAddress.Loopback, 0);
+        l.Start();
+        int port = ((IPEndPoint)l.LocalEndpoint).Port;
+        l.Stop();
+        try { CrashReports.Pull(new Usbmux("127.0.0.1", port)); Check(false, "كان يجب أن يفشل"); }
+        catch (DeviceException ex) { Check(ex.Message.Contains("Apple Mobile Device"), "رسالة: " + ex.Message); }
+
+        using (var fake = new FakeIPhone(new(), devices: 0))
+        {
+            try { CrashReports.Pull(new Usbmux("127.0.0.1", fake.Port)); Check(false, "كان يجب أن يفشل"); }
+            catch (DeviceException ex) { Check(ex.Message.Contains("لا يوجد آيفون"), "رسالة: " + ex.Message); }
+        }
+        using (var fake = new FakeIPhone(new(), lockdownError: "PasswordProtected"))
+        {
+            try { CrashReports.Pull(new Usbmux("127.0.0.1", fake.Port)); Check(false, "كان يجب أن يفشل"); }
+            catch (DeviceException ex) { Check(ex.Message.Contains("افتح قفل"), "رسالة: " + ex.Message); }
+        }
+    }
+
+    static void PairTls()
+    {
+        using var hostKey = System.Security.Cryptography.RSA.Create(2048);
+        var hostReq = new System.Security.Cryptography.X509Certificates.CertificateRequest("CN=Kashif Host", hostKey,
+            System.Security.Cryptography.HashAlgorithmName.SHA256, System.Security.Cryptography.RSASignaturePadding.Pkcs1);
+        using var hostCert = hostReq.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
+        // سجل الاقتران يحمل الشهادة والمفتاح بصيغة PEM (المفتاح PKCS#1 «RSA PRIVATE KEY»)
+        var pair = new Dictionary<string, object>
+        {
+            ["HostCertificate"] = Encoding.ASCII.GetBytes(hostCert.ExportCertificatePem()),
+            ["HostPrivateKey"] = Encoding.ASCII.GetBytes(hostKey.ExportRSAPrivateKeyPem()),
+        };
+        using var devKey = System.Security.Cryptography.RSA.Create(2048);
+        var devReq = new System.Security.Cryptography.X509Certificates.CertificateRequest("CN=Device", devKey,
+            System.Security.Cryptography.HashAlgorithmName.SHA256, System.Security.Cryptography.RSASignaturePadding.Pkcs1);
+        using var devTmp = devReq.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
+        var devCert = new System.Security.Cryptography.X509Certificates.X509Certificate2(devTmp.Export(System.Security.Cryptography.X509Certificates.X509ContentType.Pkcs12));
+
+        var l = new TcpListener(IPAddress.Loopback, 0);
+        l.Start();
+        string seenClient = null, echoed = null;
+        var server = new Thread(() =>
+        {
+            using var c = l.AcceptTcpClient();
+            using var ssl = new System.Net.Security.SslStream(c.GetStream(), false, (o, cert, ch, e) => { seenClient = cert?.Subject; return true; });
+            ssl.AuthenticateAsServer(devCert, clientCertificateRequired: true, checkCertificateRevocation: false);
+            var buf = new byte[4];
+            ssl.ReadExactly(buf);
+            ssl.Write(buf);
+        }) { IsBackground = true };
+        server.Start();
+        using (var client = new TcpClient())
+        {
+            client.Connect(IPAddress.Loopback, ((IPEndPoint)l.LocalEndpoint).Port);
+            using var tls = Lockdown.Tls(client.GetStream(), pair);
+            tls.Write(Encoding.ASCII.GetBytes("ping"));
+            var back = new byte[4];
+            tls.ReadExactly(back);
+            echoed = Encoding.ASCII.GetString(back);
+        }
+        server.Join(5000);
+        l.Stop();
+        Check(seenClient == "CN=Kashif Host", "الجهاز يرى شهادة الكمبيوتر: " + seenClient);
+        Check(echoed == "ping", "البيانات تمر عبر TLS");
+        bool threw = false;
+        try { Lockdown.Tls(new MemoryStream(), new Dictionary<string, object>()); } catch (DeviceException) { threw = true; }
+        Check(threw, "سجل اقتران بلا شهادة: رسالة واضحة");
+    }
+
+    /// <summary>bplist00 لقاموس نصوص (لاختبار قراءة سجل الاقتران الثنائي)</summary>
+    static byte[] BinaryPlist(Dictionary<string, string> d)
+    {
+        var objs = new List<byte[]>();
+        byte[] Str(string s)
+        {
+            bool ascii = s.All(c => c < 128);
+            var bytes = ascii ? Encoding.ASCII.GetBytes(s) : Encoding.BigEndianUnicode.GetBytes(s);
+            int len = ascii ? bytes.Length : bytes.Length / 2;
+            return new[] { (byte)((ascii ? 0x50 : 0x60) | len) }.Concat(bytes).ToArray();
+        }
+        objs.Add(null);   // 0: القاموس
+        foreach (var k in d.Keys) objs.Add(Str(k));
+        foreach (var v in d.Values) objs.Add(Str(v));
+        int n = d.Count;
+        objs[0] = new[] { (byte)(0xD0 | n) }.Concat(Enumerable.Range(1, n * 2).Select(i => (byte)i)).ToArray();
+        var ms = new MemoryStream();
+        ms.Write(Encoding.ASCII.GetBytes("bplist00"));
+        var offsets = new List<int>();
+        foreach (var o in objs) { offsets.Add((int)ms.Length); ms.Write(o); }
+        int table = (int)ms.Length;
+        foreach (var o in offsets) ms.WriteByte((byte)o);
+        var trailer = new byte[32];
+        trailer[6] = 1; trailer[7] = 1;
+        BinaryPrimitives.WriteUInt64BigEndian(trailer.AsSpan(8), (ulong)objs.Count);
+        BinaryPrimitives.WriteUInt64BigEndian(trailer.AsSpan(16), 0);
+        BinaryPrimitives.WriteUInt64BigEndian(trailer.AsSpan(24), (ulong)table);
+        ms.Write(trailer);
+        return ms.ToArray();
+    }
+
+    /// <summary>آيفون وهمي: usbmuxd على منفذ محلي، وخلفه lockdownd وخدمتا سجلات الأعطال (بلا TLS)</summary>
+    sealed class FakeIPhone : IDisposable
+    {
+        const int MoverPort = 1001, CopyPort = 1002;
+        readonly TcpListener listener = new(IPAddress.Loopback, 0);
+        readonly Dictionary<string, string> files;
+        readonly int devices;
+        readonly string lockdownError;
+        public int Port { get; }
+        public volatile bool MoverPinged;
+        public int Writes;
+
+        public FakeIPhone(Dictionary<string, string> files, int devices = 1, string lockdownError = null)
+        {
+            this.files = files;
+            this.devices = devices;
+            this.lockdownError = lockdownError;
+            listener.Start();
+            Port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            new Thread(Accept) { IsBackground = true }.Start();
+        }
+
+        void Accept()
+        {
+            while (true)
+            {
+                TcpClient c;
+                try { c = listener.AcceptTcpClient(); } catch { return; }
+                new Thread(() => { try { using (c) Serve(c.GetStream()); } catch { } }) { IsBackground = true }.Start();
+            }
+        }
+
+        static Dictionary<string, object> ReadMux(Stream s)
+        {
+            var h = new byte[16];
+            s.ReadExactly(h);
+            var body = new byte[BitConverter.ToUInt32(h, 0) - 16];
+            s.ReadExactly(body);
+            return Plist.ParseDict(body);
+        }
+
+        static void WriteMux(Stream s, Dictionary<string, object> msg)
+        {
+            var body = Plist.ToXml(msg);
+            var h = new byte[16];
+            BitConverter.TryWriteBytes(h.AsSpan(0), (uint)(16 + body.Length));
+            BitConverter.TryWriteBytes(h.AsSpan(4), 1u);
+            BitConverter.TryWriteBytes(h.AsSpan(8), 8u);
+            s.Write(h);
+            s.Write(body);
+        }
+
+        void Serve(Stream s)
+        {
+            var m = ReadMux(s);
+            switch (m.Str("MessageType"))
+            {
+                case "ListDevices":
+                    var list = new List<object>();
+                    for (int i = 0; i < devices; i++)
+                        list.Add(new Dictionary<string, object>
+                        {
+                            ["DeviceID"] = 3L, ["MessageType"] = "Attached",
+                            ["Properties"] = new Dictionary<string, object> { ["DeviceID"] = 3L, ["SerialNumber"] = "00008110-000A1B2C3D4E5F6A", ["ConnectionType"] = "USB" },
+                        });
+                    WriteMux(s, new() { ["DeviceList"] = list });
+                    break;
+                case "ReadPairRecord":
+                    WriteMux(s, new() { ["PairRecordData"] = BinaryPlist(new() { ["HostID"] = "HOST-1", ["SystemBUID"] = "BUID-1" }) });
+                    break;
+                case "Connect":
+                    long swapped = m.Long("PortNumber");
+                    int port = (int)(((swapped & 0xFF) << 8) | ((swapped >> 8) & 0xFF));
+                    WriteMux(s, new() { ["MessageType"] = "Result", ["Number"] = 0L });
+                    if (port == Lockdown.Port) ServeLockdown(s);
+                    else if (port == MoverPort) { s.Write(Encoding.ASCII.GetBytes("ping")); MoverPinged = true; }
+                    else if (port == CopyPort) ServeAfc(s);
+                    break;
+            }
+        }
+
+        void ServeLockdown(Stream s)
+        {
+            while (true)
+            {
+                var len = new byte[4];
+                try { s.ReadExactly(len); } catch { return; }
+                var body = new byte[BinaryPrimitives.ReadUInt32BigEndian(len)];
+                s.ReadExactly(body);
+                var req = Plist.ParseDict(body);
+                var r = new Dictionary<string, object> { ["Request"] = req.Str("Request") };
+                switch (req.Str("Request"))
+                {
+                    case "StartSession":
+                        if (lockdownError != null) r["Error"] = lockdownError;
+                        else if (req.Str("HostID") != "HOST-1") r["Error"] = "InvalidHostID";
+                        else { r["SessionID"] = "S1"; r["EnableSessionSSL"] = false; }
+                        break;
+                    case "GetValue":
+                        r["Value"] = req.Str("Key") switch { "DeviceName" => "iPhone يوسف", "ProductType" => "iPhone14,3", "ProductVersion" => "26.0", _ => "" };
+                        break;
+                    case "StartService":
+                        r["Port"] = req.Str("Service") == CrashReports.Mover ? (long)MoverPort : req.Str("Service") == CrashReports.Copy ? (long)CopyPort : 0L;
+                        r["EnableServiceSSL"] = false;
+                        break;
+                }
+                var outBody = Plist.ToXml(r);
+                var outLen = new byte[4];
+                BinaryPrimitives.WriteUInt32BigEndian(outLen, (uint)outBody.Length);
+                s.Write(outLen);
+                s.Write(outBody);
+            }
+        }
+
+        void ServeAfc(Stream s)
+        {
+            var open = new Dictionary<ulong, (string Path, int Pos)>();
+            ulong next = 1;
+            while (true)
+            {
+                (ulong Op, byte[] Header, byte[] Payload) p;
+                try { p = Afc.Read(s); } catch { return; }
+                string PathArg(int at) => Encoding.UTF8.GetString(p.Header, at, p.Header.Length - at).TrimEnd('\0');
+                void Reply(ulong op, byte[] header, byte[] payload = null) => s.Write(Afc.Packet(op, 0, header, payload));
+                void Status(ulong code) { var b = new byte[8]; BinaryPrimitives.WriteUInt64LittleEndian(b, code); Reply(Afc.OpStatus, b); }
+                bool IsDir(string path) => path == "/" || files.Keys.Any(f => f.StartsWith(path.TrimEnd('/') + "/"));
+                switch (p.Op)
+                {
+                    case Afc.OpReadDir:
+                    {
+                        var dir = PathArg(0).TrimEnd('/');
+                        if (!IsDir(dir == "" ? "/" : dir)) { Status(8); break; }
+                        var children = files.Keys.Where(f => f.StartsWith(dir + "/")).Select(f => f[(dir.Length + 1)..].Split('/')[0]).Distinct();
+                        Reply(Afc.OpData, null, Encoding.UTF8.GetBytes(string.Join("\0", new[] { ".", ".." }.Concat(children)) + "\0"));
+                        break;
+                    }
+                    case Afc.OpGetFileInfo:
+                    {
+                        var path = PathArg(0);
+                        if (IsDir(path)) Reply(Afc.OpData, null, Encoding.UTF8.GetBytes("st_ifmt\0S_IFDIR\0"));
+                        else if (files.ContainsKey(path)) Reply(Afc.OpData, null, Encoding.UTF8.GetBytes("st_ifmt\0S_IFREG\0"));
+                        else Status(8);
+                        break;
+                    }
+                    case Afc.OpFileOpen:
+                    {
+                        ulong mode = BinaryPrimitives.ReadUInt64LittleEndian(p.Header);
+                        if (mode != 1) Interlocked.Increment(ref Writes);
+                        var path = PathArg(8);
+                        if (!files.ContainsKey(path)) { Status(8); break; }
+                        open[next] = (path, 0);
+                        var h = new byte[8];
+                        BinaryPrimitives.WriteUInt64LittleEndian(h, next++);
+                        Reply(Afc.OpFileOpenRes, h);
+                        break;
+                    }
+                    case Afc.OpFileRead:
+                    {
+                        ulong handle = BinaryPrimitives.ReadUInt64LittleEndian(p.Header);
+                        int want = (int)BinaryPrimitives.ReadUInt64LittleEndian(p.Header.AsSpan(8));
+                        var (path, pos) = open[handle];
+                        var all = Encoding.UTF8.GetBytes(files[path]);
+                        int n = Math.Min(want, all.Length - pos);
+                        open[handle] = (path, pos + n);
+                        Reply(Afc.OpData, null, all.AsSpan(pos, n).ToArray());
+                        break;
+                    }
+                    case Afc.OpFileClose: open.Remove(BinaryPrimitives.ReadUInt64LittleEndian(p.Header)); Status(0); break;
+                    default: Interlocked.Increment(ref Writes); Status(1); break;
+                }
+            }
+        }
+
+        public void Dispose() => listener.Stop();
+    }
+}

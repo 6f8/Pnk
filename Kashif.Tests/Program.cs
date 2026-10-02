@@ -35,6 +35,7 @@ static partial class Program
         Run("كلمات تشبه التواقيع", NoFalseSignatures);
         Run("نصوص فارغة وغريبة", Garbage);
         RunMore();
+        RunDevice();
         Console.WriteLine($"\nنجح {passed}، فشل {failed}");
         return failed == 0 ? 0 : 1;
     }

@@ -32,7 +32,7 @@ public class AnalyzeForm : BaseForm
     readonly CardStack steps = new() { Dock = DockStyle.Fill, Padding = new Padding(2), EmptyText = "لا توجد خطوات" };
     readonly CardStack evidence = new() { Dock = DockStyle.Fill, Padding = new Padding(2), EmptyText = "لا توجد أدلة" };
     readonly CardPanel logsCard, stepsCard, evidenceCard;
-    readonly ModernButton bOpen, bPaste, bExam, bRaw, bClear, bCustomer, bSave, bReport, bMore, bLogs, bRemove;
+    readonly ModernButton bOpen, bPaste, bDevice, bExam, bRaw, bClear, bCustomer, bSave, bReport, bMore, bLogs, bRemove;
     readonly ContextMenuStrip moreMenu = new() { RightToLeft = RightToLeft.Yes, ShowImageMargin = false };
 
     // ---------- حالة الفحص ----------
@@ -86,6 +86,7 @@ public class AnalyzeForm : BaseForm
         var bar = Theme.Bar();
         bOpen = Theme.Btn("فتح ملفات", Theme.Brand, 130, "folder-open");
         bPaste = Theme.Btn("لصق", Theme.Brand, 90, "clipboard-list");
+        bDevice = Theme.Btn("من الآيفون", Theme.Brand, 130, "smartphone");
         bExam = Theme.Btn("الفحص والخطوات", Theme.Brand, 170, "list-checks");
         bRaw = Theme.Btn("نص السجل", Theme.Gray, 120, "scroll-text");
         bClear = Theme.Btn("فحص جديد", Theme.Gray, 120, "plus");
@@ -95,7 +96,7 @@ public class AnalyzeForm : BaseForm
         bMore = Theme.Btn("المزيد", Theme.Gray, 100, "ellipsis");
         bLogs = Theme.Btn("السجلات", Theme.Gray, 110, "panel-right");
         tCombine.Margin = new Padding(12, 8, 6, 2);
-        bar.Controls.AddRange(new Control[] { bOpen, bPaste, bExam, bRaw, bClear, tCombine, bCustomer, bSave, bReport, bMore, bLogs });
+        bar.Controls.AddRange(new Control[] { bOpen, bPaste, bDevice, bExam, bRaw, bClear, tCombine, bCustomer, bSave, bReport, bMore, bLogs });
         foreach (var b in bar.Controls.OfType<ModernButton>()) { b.Height = 40; b.Margin = new Padding(4, 3, 4, 3); }
         moreMenu.Font = Theme.F(10.5f);
         moreMenu.Items.Add("الخط الزمني للسجلات", null, (s, e) => ShowTimeline());
@@ -174,6 +175,7 @@ public class AnalyzeForm : BaseForm
         // ---------- الأحداث ----------
         bOpen.Click += (s, e) => PickFiles();
         bPaste.Click += (s, e) => PasteClipboard();
+        bDevice.Click += (s, e) => PullFromDevice();
         bExam.Click += (s, e) => ShowDetails(null);
         bRaw.Click += (s, e) => ShowRaw(null);
         bClear.Click += (s, e) => ClearAll(ask: true);
@@ -388,6 +390,44 @@ public class AnalyzeForm : BaseForm
             AddText(Clipboard.GetText(), "نص ملصوق");
         }
         catch (Exception ex) { Ui.Warn("تعذرت قراءة الحافظة: " + ex.Message); }
+    }
+
+    /// <summary>
+    /// سحب سجلات البانك من الآيفون الموصول بالكيبل (يحتاج خدمة Apple Mobile Device من iTunes أو Apple Devices،
+    /// وأن يكون الجهاز قد وثق بهذا الكمبيوتر). قراءة فقط: لا يُحذف شيء من الجهاز.
+    /// </summary>
+    async void PullFromDevice()
+    {
+        if (busy || !Session.Guard("analyze")) return;
+        busy = true;
+        UpdateButtons();
+        if (!logsCard.Visible) SetLogsVisible(true);
+        var old = logsCard.Subtitle;
+        var progress = new Progress<string>(t => logsCard.Subtitle = t);
+        Kashif.Device.DevicePull pull;
+        try { pull = await Task.Run(() => Kashif.Device.CrashReports.Pull(progress: progress)); }
+        catch (Kashif.Device.DeviceException ex) { Dialogs.Warn(ex.Message, "السحب من الآيفون"); return; }
+        catch (Exception ex) { Dialogs.Warn("تعذر السحب من الآيفون: " + ex.Message, "السحب من الآيفون"); return; }
+        finally
+        {
+            busy = false;
+            if (!IsDisposed) { logsCard.Subtitle = old; UpdateButtons(); }
+        }
+        if (IsDisposed) return;
+        var device = string.Join(" · ", new[] { pull.DeviceName, AppleDevices.Name(pull.ProductType), pull.Version == "" ? "" : "iOS " + pull.Version }.Where(x => !string.IsNullOrWhiteSpace(x)));
+        if (pull.Logs.Count == 0)
+        {
+            Dialogs.Message($"{device}\n\nلا توجد سجلات بانك في الجهاز.\nإن كان الجهاز يعيد التشغيل فعلًا، انتظر حتى يحدث البانك مرة ثم أعد السحب.", "السحب من الآيفون", Tone.Info);
+            if (logs.Count <= 1 && !logsToggledByUser) SetLogsVisible(false);
+            return;
+        }
+        var found = pull.Logs.SelectMany(l => PanicParser.ParseMany(l.Text, l.Name)).ToList();
+        Merge(found);
+        var notes = new List<string>();
+        if (pull.Older > 0) notes.Add($"سُحب أحدث {pull.Logs.Count} سجل، وفي الجهاز {pull.Older} سجلات أقدم لم تُسحب.");
+        if (pull.Failed > 0) notes.Add($"تعذرت قراءة {pull.Failed} سجل.");
+        Toast.Show($"سُحب {pull.Logs.Count} سجل من {device}");
+        if (notes.Count > 0) Dialogs.Message(string.Join("\n", notes), "السحب من الآيفون", Tone.Info);
     }
 
     /// <summary>صورة في الحافظة (لقطة شاشة للسجل): تُقرأ بقارئ النصوص في الخلفية ثم تُحلَّل</summary>
@@ -651,7 +691,7 @@ public class AnalyzeForm : BaseForm
 
     void UpdateButtons()
     {
-        foreach (var b in new[] { bOpen, bPaste, bRaw, bClear }) b.Enabled = !busy;
+        foreach (var b in new[] { bOpen, bPaste, bDevice, bRaw, bClear }) b.Enabled = !busy;
         bSave.Enabled = !busy && shown != null && Session.Can("history");
         bReport.Enabled = bCustomer.Enabled = bMore.Enabled = bExam.Enabled = shown != null;
         bRemove.Enabled = !busy && logs.Count > 0;
