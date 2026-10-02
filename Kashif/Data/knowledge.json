@@ -1,6 +1,6 @@
 {
- "version": 6,
- "_readme": "قاعدة معرفة كاشف. part = اسم ثابت من قائمة Parts في الكود. score من 1 إلى 99 للترتيب فقط. level: مؤكد/شائع/محتمل. families: X11 (iPhone X إلى 11) و Later (12 وما بعده) و Early (8 وما قبله و SE) و default. models: رمز موديل محدد (مثل iPhone13,2) يغلب على الجيل — لا تُضاف إلا معلومة مؤكدة. smcFailures: نص فشل SMC (مثل SMC BSC failure) ← القطع، حسب موديل محدد إن وُثّقت حالة مؤكدة، وإلا default بدرجة منخفضة. questions.cost: free (فحص أو فصل أو سؤال بلا شراء) أو part (يحتاج قطعة بديلة) — الأسئلة المجانية تُسأل أولًا.",
+ "version": 7,
+ "_readme": "قاعدة معرفة كاشف. part = اسم ثابت من قائمة Parts في الكود. score من 1 إلى 99 للترتيب فقط. level: مؤكد/شائع/محتمل. families: X11 (iPhone X إلى 11) و Later (12 وما بعده) و Early (8 وما قبله و SE) و default. models: رمز موديل محدد (مثل iPhone13,2) يغلب على الجيل — لا تُضاف إلا معلومة مؤكدة. smcFailures: نص فشل SMC (مثل SMC BSC failure) ← القطع، حسب موديل محدد إن وُثّقت حالة مؤكدة، وإلا default بدرجة منخفضة. questions.cost: free (فحص أو فصل أو سؤال بلا شراء) أو part (يحتاج قطعة بديلة) — الأسئلة المجانية تُسأل أولًا. batteryDesign: السعة الأصلية لبطارية الموديل (mAh) من مصدرين متطابقين على الأقل — تُقارن بسعة الشريحة لكشف البطارية غير الأصلية (فرق أكثر من 5%). الموديلات التي اختلفت مصادرها (مثل iPhone 11 Pro) لم تُضف.",
  "sensors": [
   {
    "code": "Prs0",
@@ -2238,6 +2238,53 @@
    ],
    "source": "اختبارات الفحص العملي المعتادة في ورش الصيانة",
    "cost": "free"
+  }
+ ],
+ "batteryDesign": [
+  {
+   "product": "iPhone12,1",
+   "mAh": 3110,
+   "source": "قوائم متطابقة: techyuga.com/list-of-iphone-battery-mah و rapidrepair.in (iPhone battery mAh list)"
+  },
+  {
+   "product": "iPhone12,5",
+   "mAh": 3969,
+   "source": "قوائم متطابقة: techyuga.com/list-of-iphone-battery-mah و rapidrepair.in (iPhone battery mAh list)"
+  },
+  {
+   "product": "iPhone13,2",
+   "mAh": 2815,
+   "source": "قوائم متطابقة: techyuga.com/list-of-iphone-battery-mah و rapidrepair.in (iPhone battery mAh list)"
+  },
+  {
+   "product": "iPhone13,4",
+   "mAh": 3687,
+   "source": "قوائم متطابقة: techyuga.com/list-of-iphone-battery-mah و rapidrepair.in (iPhone battery mAh list)"
+  },
+  {
+   "product": "iPhone14,5",
+   "mAh": 3227,
+   "source": "https://www.macrumors.com/2021/09/24/iphone-13-battery-capacities-in-mah/ (تفكيك وملفات تنظيمية)"
+  },
+  {
+   "product": "iPhone14,2",
+   "mAh": 3095,
+   "source": "https://www.macrumors.com/2021/09/24/iphone-13-battery-capacities-in-mah/ (تفكيك وملفات تنظيمية)"
+  },
+  {
+   "product": "iPhone14,3",
+   "mAh": 4352,
+   "source": "https://www.macrumors.com/2021/09/24/iphone-13-battery-capacities-in-mah/ (تفكيك وملفات تنظيمية) + DXOMARK"
+  },
+  {
+   "product": "iPhone17,1",
+   "mAh": 3582,
+   "source": "https://www.macrumors.com/2024/09/19/iphone-16-battery-capacities-revealed/"
+  },
+  {
+   "product": "iPhone17,2",
+   "mAh": 4685,
+   "source": "https://www.macrumors.com/2024/09/19/iphone-16-battery-capacities-revealed/"
   }
  ]
 }

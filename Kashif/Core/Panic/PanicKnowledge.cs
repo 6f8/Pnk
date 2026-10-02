@@ -173,6 +173,8 @@ public static class PanicKnowledge
     /// <summary>جواب في الفحص التفاعلي: أثره على درجة كل قطعة (بالاسم)، وهل هو اختبار حاسم</summary>
     public sealed record AnswerOption(string Label, IReadOnlyDictionary<string, int> Effects, bool Decisive, string Note, bool Add);
     /// <summary>سؤال في الفحص التفاعلي: يُسأل عندما تكون إحدى قطعه المستهدفة بين الأسباب الأعلى</summary>
+    /// <summary>سعة بطارية الموديل الأصلية كما تذكرها المصادر</summary>
+    public sealed record BatteryDesign(string Product, int Mah, string Source);
     public sealed record Question(string Id, string Text, string Hint, string[] Targets, int Priority, AnswerOption[] Answers, string Source, bool Free = true);
 
     /// <summary>قاعدة معرفة كاملة مقروءة من ملف</summary>
@@ -186,6 +188,8 @@ public static class PanicKnowledge
         public List<Signature> Signatures = new();
         public List<Kext> Kexts = new();
         public List<Question> Questions = new();
+        /// <summary>السعة الأصلية لبطارية كل موديل (mAh) — لكشف البطارية غير الأصلية</summary>
+        public Dictionary<string, BatteryDesign> BatteryDesigns = new(StringComparer.Ordinal);
         /// <summary>مشكلات في الملف (قطعة غير معروفة، درجة خارج الحدود، تعبير غير صالح...) — فارغة إذا كان الملف سليمًا</summary>
         public List<string> Problems = new();
     }
@@ -288,6 +292,17 @@ public static class PanicKnowledge
                 b.SmcFailures.Add(f);
             }
 
+        if (root.TryGetProperty("batteryDesign", out var designs))
+            foreach (var e in designs.EnumerateArray())
+            {
+                var p = S(e, "product");
+                int mah = e.TryGetProperty("mAh", out var mv) && mv.TryGetInt32(out var m) ? m : 0;
+                if (!AppleDevices.IsKnown(p)) b.Problems.Add($"سعة البطارية: موديل غير معروف «{p}»");
+                if (mah is < 1000 or > 8000) b.Problems.Add($"سعة البطارية «{p}»: {mah} خارج الحدود");
+                if (S(e, "source").Trim() == "") b.Problems.Add($"سعة البطارية «{p}»: بلا مصدر");
+                b.BatteryDesigns[p] = new BatteryDesign(p, mah, S(e, "source"));
+            }
+
         if (root.TryGetProperty("services", out var services))
             foreach (var e in services.EnumerateArray())
             {
@@ -356,6 +371,9 @@ public static class PanicKnowledge
     /// <summary>أول نص فشل SMC معروف يظهر في نص البانك</summary>
     public static SmcFailure FindSmcFailure(string panicText) =>
         Current.SmcFailures.FirstOrDefault(f => (panicText ?? "").Contains(f.Match, StringComparison.OrdinalIgnoreCase));
+
+    public static BatteryDesign FindBatteryDesign(string product) =>
+        product != null && Current.BatteryDesigns.TryGetValue(product, out var d) ? d : null;
 
     public static Sensor FindSensor(string code) =>
         Current.Sensors.FirstOrDefault(s => s.Code.Equals(code, StringComparison.OrdinalIgnoreCase));

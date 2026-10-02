@@ -496,6 +496,10 @@ public class AnalyzeForm : BaseForm
                 : b.Percent < 80 ? "سعتها منخفضة: تستحق التبديل لأجل عمر الشحن، لكنها وحدها لا تفسّر بانكًا يذكر قطعة أخرى." : "مقبولة.");
         }
         else sb.AppendLine("البطارية: لم يعطِ الجهاز قراءة.");
+        if (c.Battery is { Valid: true } b2 && PanicKnowledge.FindBatteryDesign(c.Identity?.ProductType) is { } spec)
+            sb.AppendLine(Math.Abs(b2.DesignMah - spec.Mah) > spec.Mah * 0.05
+                ? $"السعة الأصلية المبرمجة {b2.DesignMah} mAh لا تطابق بطارية هذا الموديل (نحو {spec.Mah}): غالبًا بطارية غير أصلية."
+                : $"السعة الأصلية المبرمجة تطابق الموديل (نحو {spec.Mah} mAh) — لا يثبت هذا أنها أصلية.");
         sb.AppendLine();
         sb.AppendLine(c.Charge != null ? "الشحن: " + c.Charge.Verdict + "\n(" + c.Charge + ")" : "الشحن: لم يعطِ الجهاز قراءة.");
         sb.AppendLine("\nنسبة البطارية من السعة الحالية والأصلية التي يسجلها الجهاز، وقد تختلف ببضع درجات عن «السعة القصوى» في الإعدادات.");
@@ -718,7 +722,11 @@ public class AnalyzeForm : BaseForm
         bool sameDevice = device != null && (devProduct == "" || shown.Product == "" || shown.Product == devProduct);
         if (sameDevice)
         {
-            if (device.Battery is { Valid: true } bat) PanicAnalyzer.ApplyBattery(shown, bat.Percent, bat.CycleCount);
+            if (device.Battery is { Valid: true } bat)
+            {
+                PanicAnalyzer.ApplyBattery(shown, bat.Percent, bat.CycleCount);
+                PanicAnalyzer.ApplyBatteryOrigin(shown, devProduct, bat.DesignMah);
+            }
             if (device.Charge is { } chg) PanicAnalyzer.ApplyCharging(shown, chg.PathWorks, chg.Verdict);
         }
 

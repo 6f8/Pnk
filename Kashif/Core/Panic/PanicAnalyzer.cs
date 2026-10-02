@@ -481,6 +481,26 @@ public static class PanicAnalyzer
     }
 
     /// <summary>
+    /// البطارية الأصلية: السعة الأصلية التي تسجلها شريحة البطارية تُقارن بسعة بطارية الموديل (من المصادر).
+    /// فرق أكثر من 5% ← غالبًا غير أصلية أو مُعادة البرمجة (+10)؛ التطابق لا يثبت أنها أصلية (البطاريات المقلّدة قد تنسخ الرقم).
+    /// </summary>
+    public static void ApplyBatteryOrigin(Diagnosis d, string product, int designMah)
+    {
+        if (d == null || designMah <= 0 || PanicKnowledge.FindBatteryDesign(product) is not { } spec) return;
+        double diff = Math.Abs(designMah - spec.Mah) / (double)spec.Mah;
+        var name = AppleDevices.Name(product);
+        if (diff > 0.05)
+        {
+            d.Evidence.Add(new("بطارية غير أصلية على الأرجح", $"تسجّل {designMah} mAh وبطارية {name} الأصلية نحو {spec.Mah} mAh",
+                "السعة الأصلية المبرمجة في شريحة البطارية لا تطابق الموديل: غالبًا بطارية تجارية أو مُعادة البرمجة — قد تسبب أعطال حساس حرارة البطارية.", null, "exam"));
+            Bump(d, Parts.Battery, 10, $"بطارية غير أصلية على الأرجح ({designMah} بدل نحو {spec.Mah} mAh)");
+            Rank(d);
+        }
+        else d.Evidence.Add(new("سعة البطارية الأصلية", $"{designMah} mAh تطابق {name} (نحو {spec.Mah})",
+            "تطابق الرقم لا يثبت أن البطارية أصلية — المقلّدة قد تنسخه.", null, "exam"));
+    }
+
+    /// <summary>
     /// البطارية مقاسة من الجهاز بالكيبل (لا من السجل): دليل عملي. سليمة (85% فأكثر وأقل من 1000 دورة) ← تنخفض درجتها بوضوح؛
     /// ضعيفة (أقل من 80%) ← ترتفع قليلًا فقط، لأن ضعف السعة يسبب انطفاءً مفاجئًا لكنه وحده لا يفسّر انهيارًا يذكر حساسًا آخر.
     /// </summary>

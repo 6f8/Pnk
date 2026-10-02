@@ -17,6 +17,7 @@ static partial class Program
         Run("تصدير الحالات المؤكدة", ExportCases);
         Run("تاريخ الإصلاح وثبات مدة الانهيار", RepairAndUptime);
         Run("خبرة المحل: نفس البصمة ونفس مصفوفة الحساسات", ShopHistory);
+        Run("البطارية غير الأصلية من السعة المبرمجة", BatteryOrigin);
         Run("السجلات ونتائجها المتوقعة (.expected)", ExpectedSamples);
         Run("اللقطات: ترتيب الأسباب لم يتغير دون قصد", Snapshots);
         Run("تحمّل: نصوص تالفة وعشوائية", Fuzz);
@@ -574,5 +575,24 @@ static partial class Program
         var before = string.Join(",", free.Candidates.Select(x => x.Part + x.Score));
         PanicAnalyzer.ApplyShopHistory(free, new List<(string, int)> { ("فلاتة صينية", 4) }, false);
         Check(string.Join(",", free.Candidates.Select(x => x.Part + x.Score)) == before, "قطعة بنص حر: دليل فقط");
+    }
+
+    static void BatteryOrigin()
+    {
+        Check(PanicKnowledge.Current.Problems.Count == 0, "قاعدة المعرفة سليمة: " + string.Join(" | ", PanicKnowledge.Current.Problems));
+        Check(PanicKnowledge.FindBatteryDesign("iPhone14,3")?.Mah == 4352, "iPhone 13 Pro Max = 4352");
+        Check(PanicKnowledge.FindBatteryDesign("iPhone12,3") == null, "iPhone 11 Pro غير مضاف (المصادر مختلفة)");
+
+        Diagnosis Fresh() => PanicAnalyzer.Analyze(PanicParser.ParseMany(Sample("smc_bsc_d64_screen_sensor.ips"), "x")[0]);
+        var fake = Fresh();
+        int bat = fake.Candidates.First(c => c.Part == Parts.Battery).Score;
+        PanicAnalyzer.ApplyBatteryOrigin(fake, "iPhone14,3", 5000);
+        Check(fake.Evidence.Any(e => e.What == "بطارية غير أصلية على الأرجح") && fake.Candidates.First(c => c.Part == Parts.Battery).Score == bat + 10, "5000 بدل 4352 ← غير أصلية +10");
+        var real = Fresh();
+        PanicAnalyzer.ApplyBatteryOrigin(real, "iPhone14,3", 4352);
+        Check(real.Evidence.Any(e => e.What == "سعة البطارية الأصلية") && real.Candidates.First(c => c.Part == Parts.Battery).Score == bat, "تطابق ← دليل فقط");
+        var unknown = Fresh();
+        PanicAnalyzer.ApplyBatteryOrigin(unknown, "iPhone12,3", 1000);
+        Check(!unknown.Evidence.Any(e => e.What.Contains("البطارية")), "موديل بلا سعة معروفة ← لا حكم");
     }
 }
