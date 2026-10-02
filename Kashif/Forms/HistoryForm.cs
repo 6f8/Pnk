@@ -36,7 +36,8 @@ public class HistoryForm : BaseForm
         var bOpen = Theme.Btn("فتح الفحص", Theme.Brand, 120, "eye");
         var bNew = Theme.Btn("فحص جديد", Theme.Success, 120, "plus");
         var bDel = Theme.Btn("حذف", Theme.Danger, 90, "trash-2");
-        bar.Controls.AddRange(new Control[] { bOpen, bNew, bDel });
+        var bExport = Theme.Btn("تصدير الحالات المؤكدة", Theme.Gray, 200, "download");
+        bar.Controls.AddRange(new Control[] { bOpen, bNew, bDel, bExport });
         Ui.GridTools(bar, grid, () => PageTitle, () => $"من {from.Value:yyyy-MM-dd} إلى {to.Value:yyyy-MM-dd}");
         foreach (var b in bar.Controls.OfType<ModernButton>()) b.Margin = new Padding(4, 24, 4, 3);
 
@@ -55,6 +56,7 @@ public class HistoryForm : BaseForm
         bOpen.Click += (s, e) => OpenSelected();
         bNew.Click += (s, e) => MainForm.Instance?.Go(AnalyzeForm.PageTitle);
         bDel.Click += (s, e) => DeleteSelected();
+        bExport.Click += (s, e) => ExportCases();
         Reload();
     }
 
@@ -85,6 +87,30 @@ public class HistoryForm : BaseForm
     {
         long id = SelectedId();
         if (id > 0) AnalyzeForm.OpenRecord(id);
+    }
+
+    /// <summary>الحالات التي سُجّلت لها القطعة المُصلِحة ← zip فيه السجلات الأصلية ونتيجة كل حالة (بلا الزبون والهاتف)</summary>
+    void ExportCases()
+    {
+        var dt = Db.Query(CaseExport.Query);
+        if (dt.Rows.Count == 0)
+        {
+            Ui.Warn("لا توجد حالات مؤكدة بعد.\nافتح الفحص بعد إصلاح الجهاز، واكتب في «النتيجة» القطعة التي أصلحته فعلًا، ثم احفظه.");
+            return;
+        }
+        using var sfd = new SaveFileDialog { Title = "تصدير الحالات المؤكدة", Filter = "ملف مضغوط (*.zip)|*.zip", FileName = $"kashif-cases-{DateTime.Now:yyyy-MM-dd}.zip" };
+        if (sfd.ShowDialog() != DialogResult.OK) return;
+        try
+        {
+            var cases = dt.Rows.Cast<DataRow>().Select(r => new CaseExport.Case(Db.L(r["id"]), Db.S(r["date"]), Db.S(r["device"]), Db.S(r["product"]), Db.S(r["ios"]),
+                Db.S(r["kind"]), Db.S(r["title"]), Db.S(r["top_part"]), Db.S(r["top3"]), Db.S(r["fixed_part"]), Db.S(r["fixed_date"]),
+                Db.S(r["flags"]), Db.S(r["answers"]), Db.S(r["notes"]), Db.S(r["raw"])));
+            int n;
+            using (var fs = File.Create(sfd.FileName)) n = CaseExport.Write(fs, cases);
+            Dialogs.Info($"صُدّرت {n} حالة مؤكدة إلى:\n{sfd.FileName}\n\nفي الملف: سجلات البانك الأصلية، والقطعة التي أصلحت كل جهاز، وملاحظات الفني. " +
+                "لا يحتوي اسم الزبون ولا هاتفه، لكن سجلات البانك نفسها تحمل معرّفات الجهاز.", "تصدير الحالات");
+        }
+        catch (Exception ex) { Ui.Warn("تعذر التصدير: " + ex.Message); }
     }
 
     void DeleteSelected()

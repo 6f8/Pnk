@@ -14,6 +14,7 @@ static partial class Program
     {
         Run("تناسق قاعدة المعرفة", KnowledgeConsistency);
         Run("رموز موثّقة من iFixit (الإصدار 6)", VerifiedCodes);
+        Run("تصدير الحالات المؤكدة", ExportCases);
         Run("السجلات ونتائجها المتوقعة (.expected)", ExpectedSamples);
         Run("اللقطات: ترتيب الأسباب لم يتغير دون قصد", Snapshots);
         Run("تحمّل: نصوص تالفة وعشوائية", Fuzz);
@@ -459,5 +460,28 @@ static partial class Program
         Check(pm.Candidates.Any(c => c.Part == Parts.ChargingFlex), "TG0V على 11 Pro Max: فلاتة الشحن بين الأسباب");
         var x = PanicAnalyzer.Analyze(PanicParser.ParseMany(mic1, "x")[0]);
         Check(x.TopPart == Parts.Battery, "TG0V على iPhone X: الأرجح=" + x.TopPart);
+    }
+
+    static void ExportCases()
+    {
+        var raw = System.Text.Json.JsonSerializer.Serialize(new List<string[]> { new[] { "panic-full-2026.ips", "panic text" }, new[] { "نص/ملصوق:1", "second" } });
+        var cases = new[]
+        {
+            new CaseExport.Case(7, "2026-09-27", "iPhone 13 Pro Max", "iPhone14,3", "26.0", "SMC", "انهيار", Parts.FrontFlex,
+                Parts.FrontFlex + "\n" + Parts.LastPart, Parts.FrontFlex, "2026-09-28", "screen", "prior_repair=0", "بدّلت الحساس", raw),
+            new CaseExport.Case(8, "2026-09-27", "iPhone 11", "iPhone12,1", "17", "حساس", "x", Parts.ChargingFlex, "", Parts.Battery, "", "", "", "", ""),
+        };
+        using var ms = new MemoryStream();
+        int n = CaseExport.Write(ms, cases);
+        Check(n == 1, $"حالة واحدة لها سجلات (صُدّر {n})");
+        ms.Position = 0;
+        using var zip = new System.IO.Compression.ZipArchive(ms);
+        var names = zip.Entries.Select(e => e.FullName).ToList();
+        Check(names.Contains("case-0007/case.txt"), "case.txt: " + string.Join(", ", names));
+        Check(names.Contains("case-0007/01-panic-full-2026.ips"), "اسم السجل الأصلي محفوظ");
+        Check(names.Any(x => x.StartsWith("case-0007/02-") && !x[13..].Contains('/')), "مصدر فيه / يُنظَّف");
+        using var r = new StreamReader(zip.GetEntry("case-0007/case.txt").Open());
+        var txt = r.ReadToEnd();
+        Check(txt.Contains("القطعة التي أصلحت الجهاز فعلًا: " + Parts.FrontFlex) && txt.Contains("ترتيبها عند كاشف: 1"), "نتيجة الحالة وترتيبها");
     }
 }
