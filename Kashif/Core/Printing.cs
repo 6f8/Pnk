@@ -68,7 +68,7 @@ public class PrintDoc
         else
         {
             d.Image(Branding.Load(Branding.LogoPath), 80);
-            d.Text(Settings.Get("shop_name"), 16, true, StringAlignment.Center);
+            d.Text(Settings.ShopName == "" ? "كاشف" : Settings.ShopName, 16, true, StringAlignment.Center);
             if (Settings.Get("shop_activity") != "") d.Text(Settings.Get("shop_activity"), 9.5f, false, StringAlignment.Center);
         }
         var sub = string.Join("  —  ", new[] { Settings.Get("shop_city"), Settings.Get("shop_address"), Settings.Get("shop_phone") }.Where(x => x != ""));

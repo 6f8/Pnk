@@ -134,7 +134,7 @@ public class MainForm : BaseForm
     public MainForm()
     {
         Instance = this;
-        Text = $"كاشف — {Settings.Get("shop_name")}";
+        Text = Settings.ShopName == "" ? "كاشف" : $"كاشف — {Settings.ShopName}";
         WindowState = FormWindowState.Maximized;
         MinimumSize = new Size(960, 600);
         KeyPreview = true;

@@ -138,8 +138,8 @@ public class DashboardForm : BaseForm
                 g.FillPath(b, path);
             using (var c = new SolidBrush(Color.FromArgb(22, 255, 255, 255))) g.FillEllipse(c, Dpi.S(-60), Dpi.S(-90), Dpi.S(260), Dpi.S(260));
             int right = Width - Dpi.S(32);
-            TextRenderer.DrawText(g, "مرحبًا، " + Session.UserName, Theme.FS(17), new Rectangle(Dpi.S(32), Dpi.S(18), right - Dpi.S(32), Dpi.S(36)), Color.White, Gfx.RtlStart);
-            TextRenderer.DrawText(g, DateTime.Now.ToString("dddd d MMMM yyyy", ar) + "  —  " + Settings.Get("shop_name") + "  —  اسحب ملفات panic-full إلى هنا أو افتحها", Theme.F(10),
+            TextRenderer.DrawText(g, "مرحبًا بك في كاشف", Theme.FS(17), new Rectangle(Dpi.S(32), Dpi.S(18), right - Dpi.S(32), Dpi.S(36)), Color.White, Gfx.RtlStart);
+            TextRenderer.DrawText(g, DateTime.Now.ToString("dddd d MMMM yyyy", ar) + (Settings.ShopName == "" ? "" : "  —  " + Settings.ShopName) + "  —  اسحب ملفات panic-full أو صورها إلى هنا، أو اسحبها من الآيفون", Theme.F(10),
                 new Rectangle(Dpi.S(32), Dpi.S(56), right - Dpi.S(32), Dpi.S(24)), Theme.HeroAccent, Gfx.RtlStart);
         }
     }

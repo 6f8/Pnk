@@ -27,7 +27,7 @@ public class AnalyzeForm : BaseForm
     readonly Label deviceLine = new() { Dock = DockStyle.Top, Height = 28, AutoSize = false, Font = Theme.F(11), ForeColor = Palette6.Muted, TextAlign = ContentAlignment.MiddleLeft };
     readonly Label heading = new() { Dock = DockStyle.Top, Height = 60, AutoSize = false, Text = "أين العطل داخل الجهاز؟", Font = Theme.F(21, FontStyle.Bold), ForeColor = Palette6.Ink, TextAlign = ContentAlignment.MiddleLeft };
     readonly Label hint = new() { Dock = DockStyle.Top, Height = 58, AutoSize = false, Font = Theme.F(11.5f), ForeColor = Palette6.Muted, TextAlign = ContentAlignment.TopLeft };
-    readonly FlowLayoutPanel flags = new() { Dock = DockStyle.Top, Height = 46, BackColor = Theme.Surface, WrapContents = false, Padding = new Padding(4, 5, 4, 0) };
+    readonly FlowLayoutPanel flags = new() { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Theme.Surface, WrapContents = true, Padding = new Padding(4, 5, 4, 0) };
     readonly TableLayoutPanel lists = new() { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = Theme.Surface, Margin = new Padding(0) };
     readonly CardStack steps = new() { Dock = DockStyle.Fill, Padding = new Padding(2), EmptyText = "لا توجد خطوات" };
     readonly CardStack evidence = new() { Dock = DockStyle.Fill, Padding = new Padding(2), EmptyText = "لا توجد أدلة" };
@@ -96,9 +96,15 @@ public class AnalyzeForm : BaseForm
         bMore = Theme.Btn("المزيد", Theme.Gray, 100, "ellipsis");
         bLogs = Theme.Btn("السجلات", Theme.Gray, 110, "panel-right");
         tCombine.Margin = new Padding(12, 8, 6, 2);
-        bar.Controls.AddRange(new Control[] { bOpen, bPaste, bDevice, bExam, bRaw, bClear, tCombine, bCustomer, bSave, bReport, bMore, bLogs });
+        // «نص السجل» و«السجلات» في قائمة «المزيد» حتى يبقى الشريط سطرًا واحدًا
+        bar.Controls.AddRange(new Control[] { bOpen, bPaste, bDevice, bExam, bClear, tCombine, bCustomer, bSave, bReport, bMore });
         foreach (var b in bar.Controls.OfType<ModernButton>()) { b.Height = 40; b.Margin = new Padding(4, 3, 4, 3); }
         moreMenu.Font = Theme.F(10.5f);
+        moreMenu.Items.Add("نص السجل", null, (s, e) => ShowRaw(null));
+        var logsItem = new ToolStripMenuItem("إظهار قائمة السجلات", null, (s, e) => { logsToggledByUser = true; SetLogsVisible(!logsCard.Visible); });
+        moreMenu.Items.Add(logsItem);
+        moreMenu.Opening += (s, e) => logsItem.Text = logsCard.Visible ? "إخفاء قائمة السجلات" : "إظهار قائمة السجلات";
+        moreMenu.Items.Add(new ToolStripSeparator());
         moreMenu.Items.Add("الخط الزمني للسجلات", null, (s, e) => ShowTimeline());
         moreMenu.Items.Add("فحوصات سابقة لهذا الجهاز", null, (s, e) => ShowPrevious());
         moreMenu.Items.Add(new ToolStripSeparator());
@@ -693,7 +699,7 @@ public class AnalyzeForm : BaseForm
     {
         foreach (var b in new[] { bOpen, bPaste, bDevice, bRaw, bClear }) b.Enabled = !busy;
         bSave.Enabled = !busy && shown != null && Session.Can("history");
-        bReport.Enabled = bCustomer.Enabled = bMore.Enabled = bExam.Enabled = shown != null;
+        bReport.Enabled = bCustomer.Enabled = bExam.Enabled = shown != null;
         bRemove.Enabled = !busy && logs.Count > 0;
         bSave.Text = recordId > 0 ? "تحديث السجل" : "حفظ في السجل";
         bSave.Invalidate();
@@ -729,7 +735,7 @@ public class AnalyzeForm : BaseForm
         catch (Exception ex) { if (!silent) Ui.Warn("تعذر الحفظ: " + ex.Message); }
     }
 
-    string ReportText(bool forCustomer) => shown == null ? "" : forCustomer ? PanicAnalyzer.CustomerReport(shown, Settings.Get("shop_name")) : PanicAnalyzer.Report(shown);
+    string ReportText(bool forCustomer) => shown == null ? "" : forCustomer ? PanicAnalyzer.CustomerReport(shown, Settings.ShopName) : PanicAnalyzer.Report(shown);
 
     void ShowReport()
     {

@@ -28,6 +28,9 @@ var ocr = await ImageText.ReadAsync(png);
 if (ocr == null) { Console.WriteLine("SKIP: no OCR engine on this Windows"); return 0; }
 File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "ocr-result.txt"), ocr);
 Console.WriteLine($"OCR read {ocr.Length} chars, {ocr.Split('\n').Length} lines");
+Console.WriteLine("----- OCR text -----");
+Console.WriteLine(ocr);
+Console.WriteLine("--------------------");
 
 var logs = PanicParser.ParseMany(ocr, "ocr-sample.png");
 bool ok = logs.Count == 1;

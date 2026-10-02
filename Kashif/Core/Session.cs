@@ -117,7 +117,7 @@ public static class Settings
 {
     public static readonly (string Key, string Caption, string Def)[] All =
     {
-        ("shop_name", "اسم المحل", "محلي"),
+        ("shop_name", "اسم المحل", ""),
         ("shop_phone", "هاتف المحل", ""),
         ("shop_address", "عنوان المحل (يظهر في الطباعة)", ""),
         ("shop_city", "المدينة", ""),
@@ -152,6 +152,9 @@ public static class Settings
     public static int Int(string key, int def) => int.TryParse(Get(key), NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) ? v : def;
     public static double Dbl(string key, double def) => double.TryParse(Get(key), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && double.IsFinite(v) ? v : def;
     public static bool On(string key) => Get(key) == "1";
+
+    /// <summary>اسم المحل إن أدخله المستخدم من الإعدادات («محلي» القيمة الافتراضية القديمة تُعامل كفارغة)</summary>
+    public static string ShopName => Get("shop_name").Trim() is var s && s != "محلي" ? s : "";
 
     public static void Set(string key, string value)
     {
