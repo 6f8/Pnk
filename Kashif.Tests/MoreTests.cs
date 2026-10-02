@@ -16,6 +16,7 @@ static partial class Program
         Run("رموز موثّقة من iFixit (الإصدار 6)", VerifiedCodes);
         Run("تصدير الحالات المؤكدة", ExportCases);
         Run("تاريخ الإصلاح وثبات مدة الانهيار", RepairAndUptime);
+        Run("خبرة المحل: نفس البصمة ونفس مصفوفة الحساسات", ShopHistory);
         Run("السجلات ونتائجها المتوقعة (.expected)", ExpectedSamples);
         Run("اللقطات: ترتيب الأسباب لم يتغير دون قصد", Snapshots);
         Run("تحمّل: نصوص تالفة وعشوائية", Fuzz);
@@ -518,5 +519,60 @@ static partial class Program
         Check(c.Evidence.Any(e => e.What == "المدة من الإقلاع إلى الانهيار" && e.Meaning.StartsWith("ثابتة")), "مهلة ثابتة");
         var mixed = new[] { 40.0, 200, 900 }.Select(u => { var d = Fresh(); d.UptimeSeconds = u; return d; }).ToList();
         Check(PanicAnalyzer.Combine(mixed).Evidence.Any(e => e.What == "المدة من الإقلاع إلى الانهيار" && e.Meaning.StartsWith("متفاوتة")), "مدد متفاوتة");
+    }
+
+    static void ShopHistory()
+    {
+        using var c = new SqliteConnection("Data Source=:memory:");
+        c.Open();
+        void Exec(string sql, params object[] p)
+        {
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = sql;
+            for (int i = 0; i < p.Length; i++) cmd.Parameters.AddWithValue("@p" + i, p[i] ?? DBNull.Value);
+            cmd.ExecuteNonQuery();
+        }
+        List<(string Part, int Count)> Rows(string sql, params object[] p)
+        {
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = sql;
+            for (int i = 0; i < p.Length; i++) cmd.Parameters.AddWithValue("@p" + i, p[i] ?? DBNull.Value);
+            using var r = cmd.ExecuteReader();
+            var rows = new List<(string, int)>();
+            while (r.Read()) rows.Add((r.GetString(0), r.GetInt32(1)));
+            return rows;
+        }
+        Exec(StoreSql.Schema);
+        foreach (var (table, col, def) in StoreSql.Migrations) Exec($"ALTER TABLE {table} ADD COLUMN {col} {def}");
+
+        var logs = PanicParser.ParseMany(Sample("smc_bsc_d64_screen_sensor.ips"), "smc");
+        Diagnosis Fresh() => PanicAnalyzer.Analyze(logs[0]);
+        var d0 = Fresh();
+        Check(PanicAnalyzer.SensorArrayKey(d0) == "1=0x1000", "مفتاح المصفوفة: " + PanicAnalyzer.SensorArrayKey(d0));
+        // ثلاث حالات مؤكدة سابقة لنفس الموديل والمصفوفة: حساس الشاشة مرتين والبطارية مرة
+        foreach (var part in new[] { Parts.FrontFlex, Parts.FrontFlex, Parts.Battery })
+            Exec(StoreSql.Insert, StoreSql.Values(d0, logs, null, "", "", "", "جاهز", part, "2026-09-28", "r").Append("2026-09-28 10:00:00").Append(1L).ToArray());
+        // حالة بلا نتيجة لا تُحسب
+        Exec(StoreSql.Insert, StoreSql.Values(d0, logs, null, "", "", "", "قيد الفحص", "", "", "r").Append("2026-09-29 10:00:00").Append(1L).ToArray());
+
+        var byArr = Rows(StoreSql.HistoryBySensorArray, d0.Product, "1=0x1000", 999L);
+        Check(byArr.Count == 2 && byArr[0] == (Parts.FrontFlex, 2) && byArr[1] == (Parts.Battery, 1), "المصفوفة: " + string.Join(", ", byArr));
+        Check(Rows(StoreSql.HistoryBySensorArray, "iPhone15,2", "1=0x1000", 999L).Count == 0, "موديل آخر لا يُحسب");
+        Check(Rows(StoreSql.HistoryBySensorArray, d0.Product, "1=0x1000", 1L).Sum(r => r.Count) == 2, "الفحص الحالي يُستثنى");
+
+        var d = Fresh();
+        PanicAnalyzer.ApplyShopHistory(d, byArr, true);
+        Check(d.TopPart == Parts.FrontFlex && d.Candidates[0].Score >= 85, $"حالتان من 3 ← حساس الشاشة الأرجح ({d.Candidates[0].Score})");
+        Check(d.Evidence.Any(e => e.What == "خبرة المحل: مصفوفة الحساسات" && e.IsExam), "دليل خبرة المحل");
+
+        var split = Fresh();
+        int bat = split.Candidates.First(x => x.Part == Parts.Battery).Score;
+        PanicAnalyzer.ApplyShopHistory(split, new List<(string, int)> { (Parts.Battery, 1), (Parts.FrontFlex, 1) }, false);
+        Check(split.Candidates.First(x => x.Part == Parts.Battery).Score == bat + 5, "حالة واحدة ← +5 فقط");
+
+        var free = Fresh();
+        var before = string.Join(",", free.Candidates.Select(x => x.Part + x.Score));
+        PanicAnalyzer.ApplyShopHistory(free, new List<(string, int)> { ("فلاتة صينية", 4) }, false);
+        Check(string.Join(",", free.Candidates.Select(x => x.Part + x.Score)) == before, "قطعة بنص حر: دليل فقط");
     }
 }

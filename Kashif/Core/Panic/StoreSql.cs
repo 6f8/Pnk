@@ -41,6 +41,8 @@ CREATE TABLE IF NOT EXISTS kb_rules(id INTEGER PRIMARY KEY, name TEXT NOT NULL, 
         // الإصدار 3: أجوبة الفحص التفاعلي (id=رقم الجواب;...)
         ("analyses", "answers", "TEXT"),
         ("kb_rules", "priority", "INTEGER DEFAULT 0"),
+        // الإصدار 4: مصفوفة حساسات SMC (الخانات غير الصفرية) — يتعلّم المحل معنى أرقامها من الحالات المؤكدة
+        ("analyses", "smc_array", "TEXT"),
     };
 
     public const string Indexes = @"
@@ -53,8 +55,8 @@ CREATE INDEX IF NOT EXISTS ix_audit_date ON audit_log(date);";
 
     // ------------------------------------------------------------------ حفظ وقراءة الفحص
     const string Cols = "customer, phone, device, product, device_key, ios, panic_time, kind, title, top_part, confidence, logs, flags, result, notes, raw, status, " +
-                        "signature, learn_pattern, top3, build, fixed_part, fixed_date, answers";
-    const int ColCount = 24;
+                        "signature, learn_pattern, top3, build, fixed_part, fixed_date, answers, smc_array";
+    const int ColCount = 25;
 
     public static readonly string Insert =
         $"INSERT INTO analyses({Cols}, date, user_id) VALUES({string.Join(",", Enumerable.Range(0, ColCount + 2).Select(i => "@p" + i))})";
@@ -77,7 +79,7 @@ CREATE INDEX IF NOT EXISTS ix_audit_date ON audit_log(date);";
             d.Kind, d.Title, d.TopPart, d.Confidence, d.LogCount, (flags ?? new CaseFlags()).Encode(),
             report, (notes ?? "").Trim(), EncodeLogs(logs), Statuses.Contains(status) ? status : Statuses[0],
             d.Signature, d.LearnPattern, top3, d.Build, (fixedPart ?? "").Trim(), (fixedPart ?? "").Trim() == "" ? "" : fixedDate ?? "",
-            PanicAnalyzer.EncodeAnswers(answers),
+            PanicAnalyzer.EncodeAnswers(answers), PanicAnalyzer.SensorArrayKey(d),
         };
     }
 
@@ -106,6 +108,14 @@ CREATE INDEX IF NOT EXISTS ix_audit_date ON audit_log(date);";
     /// نفس البصمة على أجهزة أخرى بنفس رقم بناء iOS: @p0 البناء، @p1 البصمة، @p2 مفتاح الجهاز الحالي.
     /// إذا تكرر على أكثر من جهاز فالسبب قد يكون برمجيًا في هذا الإصدار.
     /// </summary>
+    /// <summary>خبرة المحل بنفس البصمة: القطع التي أصلحت فعلًا فحوصات سابقة بنفس النمط (@p0 البصمة، @p1 الفحص الحالي يُستثنى)</summary>
+    public const string HistoryBySignature = @"SELECT TRIM(fixed_part) AS part, COUNT(*) AS n FROM analyses
+        WHERE signature=@p0 AND @p0<>'' AND id<>@p1 AND TRIM(IFNULL(fixed_part,''))<>'' GROUP BY TRIM(fixed_part) ORDER BY n DESC";
+
+    /// <summary>نفس مصفوفة حساسات SMC على نفس الموديل (@p0 الموديل، @p1 المصفوفة، @p2 الفحص الحالي)</summary>
+    public const string HistoryBySensorArray = @"SELECT TRIM(fixed_part) AS part, COUNT(*) AS n FROM analyses
+        WHERE product=@p0 AND smc_array=@p1 AND @p1<>'' AND id<>@p2 AND TRIM(IFNULL(fixed_part,''))<>'' GROUP BY TRIM(fixed_part) ORDER BY n DESC";
+
     public const string SameBuildDevices = @"SELECT COUNT(DISTINCT device_key) FROM analyses
         WHERE IFNULL(build,'')<>'' AND build=@p0 AND IFNULL(signature,'')<>'' AND signature=@p1 AND IFNULL(device_key,'')<>@p2";
 

@@ -699,6 +699,17 @@ public class AnalyzeForm : BaseForm
             shown = PanicAnalyzer.Analyze(logs[i], Flags(), PanicStore.Rules());
             shownLogs = new List<PanicLog> { logs[i] };
         }
+        // خبرة المحل قبل أجوبة الفحص: الفحص العملي يغلب ما سبق
+        try
+        {
+            if (Session.Can("history"))
+            {
+                var (bySig, byArr) = PanicStore.ShopHistory(shown, recordId);
+                if (byArr.Count > 0) PanicAnalyzer.ApplyShopHistory(shown, byArr, true);
+                if (bySig.Count > 0) PanicAnalyzer.ApplyShopHistory(shown, bySig, false);
+            }
+        }
+        catch { }
         PanicAnalyzer.ApplyAnswers(shown, answers);
         foreach (var iso in isolations) PanicAnalyzer.ApplyIsolation(shown, iso.Part, iso.Stopped, iso.Duration);
         if (repairDate.Checked) PanicAnalyzer.ApplyRepairDate(shown, repairDate.Value.Date, shownLogs.Select(l => l.Time));

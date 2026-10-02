@@ -398,6 +398,33 @@ public static class PanicAnalyzer
         Rank(d);
     }
 
+    /// <summary>مفتاح مصفوفة حساسات SMC: الخانات غير الصفرية («1=0x1000»)، أو فارغ</summary>
+    public static string SensorArrayKey(Diagnosis d) =>
+        d == null || d.SensorArray.Count == 0 ? "" : string.Join(";", d.SensorArray.OrderBy(x => x.Index).Select(x => $"{x.Index}=0x{x.Value:X}"));
+
+    /// <summary>
+    /// خبرة المحل من الحالات المؤكدة (فحوصات سُجّلت لها القطعة التي أصلحت الجهاز فعلًا):
+    /// قطعة أصلحت حالتين أو أكثر وثلثي الحالات على الأقل ← تُضاف بدرجة تزيد مع عدد الحالات؛ حالة واحدة ← +5 فقط.
+    /// القطع المكتوبة نصًا حرًا (ليست من قائمة القطع) تُذكر دليلًا فقط.
+    /// </summary>
+    /// <param name="sensorArray">true: نفس مصفوفة حساسات SMC على نفس الموديل (أدق من البصمة)</param>
+    public static void ApplyShopHistory(Diagnosis d, IReadOnlyList<(string Part, int Count)> rows, bool sensorArray)
+    {
+        if (d == null || rows == null || rows.Count == 0) return;
+        int total = rows.Sum(r => r.Count);
+        var scope = sensorArray ? $"نفس رقم مصفوفة الحساسات ({SensorArrayKey(d)}) على نفس الموديل" : "نفس البصمة";
+        d.Evidence.Add(new(sensorArray ? "خبرة المحل: مصفوفة الحساسات" : "خبرة المحل: نفس البصمة",
+            $"{total} حالة مؤكدة — " + string.Join("، ", rows.Select(r => $"{r.Part} ({r.Count})")),
+            $"فحوصات سابقة في محلك بـ{scope} أُصلحت بهذه القطع.", null, "exam"));
+        var (part, n) = rows[0];
+        if (!Parts.All.Contains(part)) return;
+        string why = $"في محلك: {n} من {total} حالات بـ{scope} أُصلحت بها";
+        if (n >= 2 && n * 3 >= total * 2)
+            Add(d, part, sensorArray ? Math.Min(95, 65 + 10 * n) : Math.Min(90, 55 + 8 * n), why);
+        else if (n == 1 && d.Candidates.Any(c => c.Part == part)) Bump(d, part, 5, why);
+        Rank(d);
+    }
+
     /// <summary>
     /// تاريخ أول بانك مقابل تاريخ آخر إصلاح (ضمن السجلات المتوفرة): أقدم بانك بعد الإصلاح بشهرين أو أقل ← آخر قطعة استُبدلت +20؛
     /// بانك قبل الإصلاح وبعده ← المشكلة سبقت الإصلاح فآخر قطعة −20.
