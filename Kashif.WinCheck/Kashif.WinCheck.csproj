@@ -14,7 +14,9 @@
   <ItemGroup>
     <Compile Include="..\Kashif\Core\Panic\*.cs" Link="Engine\%(Filename)%(Extension)" />
     <Compile Include="..\Kashif\Core\ImageText.cs" Link="Engine\ImageText.cs" />
+    <Compile Include="..\Kashif\Core\ReportImage.cs" Link="Engine\ReportImage.cs" />
     <EmbeddedResource Include="..\Kashif\Data\knowledge.json" LogicalName="Kashif.knowledge.json" />
     <None Include="..\Kashif.Tests\Samples\prs0_iphone11_ocr.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\Kashif.Tests\Samples\smc_bsc_d64_screen_sensor.ips" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

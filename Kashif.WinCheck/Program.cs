@@ -2,6 +2,13 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using Kashif;
 
+// تقرير الزبون صورةً لحالة iPhone 13 Pro Max (تُرفع مع لقطات الشاشة للمراجعة)
+var smc = PanicAnalyzer.Analyze(PanicParser.ParseMany(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "smc_bsc_d64_screen_sensor.ips")), "smc")[0]);
+using (var report = ReportImage.Render(ReportImage.From(smc, "", "حساس القرب والإضاءة", new DateTime(2026, 9, 27)),
+           (px, bold) => new Font("Segoe UI", px * 72f / 96f, bold ? FontStyle.Bold : FontStyle.Regular)))
+    report.Save(Path.Combine(AppContext.BaseDirectory, "report-sample.png"), ImageFormat.Png);
+Console.WriteLine("report-sample.png written");
+
 // قارئ النصوص في ويندوز على لقطة شاشة مرسومة من سجل حقيقي (iPhone 11، Prs0): هل يصل كاشف لنفس النتيجة؟
 // النتيجة: 0 نجح، 1 فشل، 0 مع SKIP إن لم يتوفر قارئ نصوص في نظام التشغيل.
 var text = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "prs0_iphone11_ocr.txt"));

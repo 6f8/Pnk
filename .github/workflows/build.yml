@@ -52,6 +52,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "iscc failed" }
           Compress-Archive -Path publish\Kashif.exe -DestinationPath "dist\Kashif-portable-$env:VERSION.zip"
 
+      - name: فحص قراءة صورة السجل (OCR ويندوز) وصورة تقرير الزبون
+        id: ocr
+        continue-on-error: true
+        run: dotnet run --project Kashif.WinCheck -c Release
+
       - name: لقطات شاشة من البرنامج
         shell: pwsh
         continue-on-error: true
@@ -87,9 +92,14 @@ jobs:
           $p = Start-Process publish\Kashif.exe -ArgumentList "`"$sample`"" -PassThru
           Start-Sleep 20
           Shot "1-analysis"
-          if (ClickByName "الفحص والخطوات") { Start-Sleep 4; Shot "2-exam-and-steps"; [System.Windows.Forms.SendKeys]::SendWait("{ESC}"); Start-Sleep 2 }
+          if (ClickByName "الفحص والخطوات") {
+            Start-Sleep 4; Shot "2-exam-and-steps"
+            if (ClickByName "اختبار العزل") { Start-Sleep 4; Shot "4-isolation-bench"; [System.Windows.Forms.SendKeys]::SendWait("{ESC}"); Start-Sleep 2 }
+            [System.Windows.Forms.SendKeys]::SendWait("{ESC}"); Start-Sleep 2
+          }
           if (ClickByName "الرئيسية") { Start-Sleep 4; Shot "3-home" }
           Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          Copy-Item Kashif.WinCheck\bin\Release\*\report-sample.png shots\5-customer-report.png -ErrorAction SilentlyContinue
           Get-ChildItem shots
 
       - name: رفع لقطات الشاشة إلى فرع ci-screenshots
@@ -122,9 +132,9 @@ jobs:
           path: shots/
           if-no-files-found: ignore
 
-      - name: فحص قراءة صورة السجل (OCR ويندوز)
-        id: ocr
-        run: dotnet run --project Kashif.WinCheck -c Release
+      - name: لا نشر إن فشل فحص قراءة الصور
+        if: steps.ocr.outcome == 'failure'
+        run: exit 1
 
       - name: النشر في Releases (latest)
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'

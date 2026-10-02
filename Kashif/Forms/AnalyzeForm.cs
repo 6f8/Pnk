@@ -118,6 +118,7 @@ public class AnalyzeForm : BaseForm
         moreMenu.Items.Add("طباعة تقرير الفني", null, (s, e) => PrintReport(false));
         moreMenu.Items.Add("طباعة تقرير الزبون", null, (s, e) => PrintReport(true));
         moreMenu.Items.Add("نسخ تقرير الزبون", null, (s, e) => CopyReport(true));
+        moreMenu.Items.Add("تقرير الزبون كصورة (واتساب)", null, (s, e) => SaveReportImage());
         moreMenu.Items.Add("نسخ تقرير الفني", null, (s, e) => CopyReport(false));
 
         // ---------- ما حدث للجهاز ----------
@@ -805,6 +806,23 @@ public class AnalyzeForm : BaseForm
         using var dlg = new ReportDialog(ReportText(false), ReportText(true));
         dlg.ShowModal();
         if (dlg.PrintRequest is bool customer) PrintReport(customer);
+    }
+
+    /// <summary>تقرير الزبون صورةً: تُحفظ PNG وتُنسخ إلى الحافظة لتُلصق مباشرة في واتساب</summary>
+    void SaveReportImage()
+    {
+        if (shown == null) return;
+        var content = ReportImage.From(shown, Settings.ShopName, fixedPartText, DateTime.Now);
+        using var bmp = ReportImage.Render(content, (px, bold) => FontKit.Get(px * 72f / 96f, bold ? FontStyle.Bold : FontStyle.Regular));
+        using var sfd = new SaveFileDialog { Title = "حفظ تقرير الزبون كصورة", Filter = "صورة PNG (*.png)|*.png", FileName = $"تقرير-{shown.Device}-{DateTime.Now:yyyy-MM-dd}.png".Replace(' ', '-') };
+        if (sfd.ShowDialog() != DialogResult.OK) return;
+        try
+        {
+            bmp.Save(sfd.FileName, System.Drawing.Imaging.ImageFormat.Png);
+            try { Clipboard.SetImage(bmp); } catch { }
+            Toast.Show("حُفظ التقرير ونُسخ إلى الحافظة — الصقه في واتساب");
+        }
+        catch (Exception ex) { Ui.Warn("تعذر حفظ الصورة: " + ex.Message); }
     }
 
     void CopyReport(bool forCustomer)
