@@ -189,7 +189,7 @@ public class AnalyzeForm : BaseForm
         logsGrid.SelectionChanged += (s, e) => { if (!loading) ShowResult(); };
         interview.Clicked += OnInterview;
         map.PartClicked += ShowCause;
-        DragEnter += (s, e) => e.Effect = e.Data.GetDataPresent(DataFormats.FileDrop) || e.Data.GetDataPresent(DataFormats.UnicodeText) ? DragDropEffects.Copy : DragDropEffects.None;
+        DragEnter += (s, e) => e.Effect = e.Data.GetDataPresent(DataFormats.FileDrop) || e.Data.GetDataPresent(DataFormats.UnicodeText) || e.Data.GetDataPresent(DataFormats.Bitmap) ? DragDropEffects.Copy : DragDropEffects.None;
         DragDrop += (s, e) => Drop(e.Data);
 
         // السجل المحفوظ يُحمَّل عند ظهور الشاشة (بعد ربط الجداول بالنافذة)
@@ -269,7 +269,7 @@ public class AnalyzeForm : BaseForm
         using var ofd = new OpenFileDialog
         {
             Multiselect = true, Title = "اختر ملفات البانك",
-            Filter = "سجلات البانك (*.ips;*.txt;*.json;*.log;*.panic)|*.ips;*.txt;*.json;*.log;*.panic|كل الملفات (*.*)|*.*",
+            Filter = "سجلات البانك أو صورها (*.ips;*.txt;*.json;*.log;*.panic;*.png;*.jpg;*.jpeg;*.bmp;*.webp;*.heic)|*.ips;*.txt;*.json;*.log;*.panic;*.png;*.jpg;*.jpeg;*.bmp;*.webp;*.heic|كل الملفات (*.*)|*.*",
         };
         if (ofd.ShowDialog() == DialogResult.OK) AddFiles(ofd.FileNames);
     }
@@ -287,14 +287,41 @@ public class AnalyzeForm : BaseForm
         (List<PanicLog> Found, List<string> Skipped) result;
         try
         {
-            result = await Task.Run(() =>
+            result = await Task.Run(async () =>
             {
                 var found = new List<PanicLog>();
                 var skippedFiles = new List<string>();
                 IProgress<int> p = progress;
+                // الصور (لقطات شاشة للسجل): تُقرأ بقارئ النصوص بترتيب أسمائها ثم تُحلَّل نصًا واحدًا،
+                // فالسجل الطويل المصوَّر على عدة لقطات يُجمع كاملًا
+                var images = list.Where(ImageText.IsImage).OrderBy(f => Path.GetFileName(f), StringComparer.OrdinalIgnoreCase).ToList();
+                if (images.Count > 0)
+                {
+                    var texts = new List<string>();
+                    foreach (var f in images)
+                    {
+                        try
+                        {
+                            if (new FileInfo(f).Length > MaxFileBytes) { skippedFiles.Add($"{Path.GetFileName(f)}: حجمه أكبر من 20 ميغابايت"); continue; }
+                            var t = await ImageText.ReadAsync(f);
+                            if (t == null) { skippedFiles.Add(ImageText.NoEngine); break; }
+                            texts.Add(t);
+                        }
+                        catch (Exception ex) { skippedFiles.Add($"{Path.GetFileName(f)}: تعذرت قراءة الصورة — {ex.Message}"); }
+                    }
+                    if (texts.Count > 0)
+                    {
+                        var joined = string.Join("\n", texts);
+                        var name = images.Count == 1 ? Path.GetFileName(images[0]) + " (صورة)" : $"{images.Count} صور ({Path.GetFileName(images[0])} …)";
+                        var fromImages = PanicParser.ParseMany(joined, name);
+                        if (fromImages.Count == 0) skippedFiles.Add($"{name}: لم يُقرأ منها سجل بانك — صوّر السجل كاملًا وبوضوح، أو انسخ نصه والصقه.");
+                        found.AddRange(fromImages);
+                    }
+                }
                 for (int i = 0; i < list.Count; i++)
                 {
                     var f = list[i];
+                    if (ImageText.IsImage(f)) { p.Report(i + 1); continue; }
                     try
                     {
                         var info = new FileInfo(f);
@@ -356,10 +383,29 @@ public class AnalyzeForm : BaseForm
         try
         {
             if (Clipboard.ContainsFileDropList()) { AddFiles(Clipboard.GetFileDropList().Cast<string>()); return; }
+            if (Clipboard.ContainsImage() && !Clipboard.ContainsText()) { PasteImage(Clipboard.GetImage()); return; }
             if (!Clipboard.ContainsText()) { Ui.Warn("الحافظة لا تحتوي نصًا. انسخ نص السجل أولًا — أو افتح «نص السجل» والصقه هناك."); return; }
             AddText(Clipboard.GetText(), "نص ملصوق");
         }
         catch (Exception ex) { Ui.Warn("تعذرت قراءة الحافظة: " + ex.Message); }
+    }
+
+    /// <summary>صورة في الحافظة (لقطة شاشة للسجل): تُقرأ بقارئ النصوص في الخلفية ثم تُحلَّل</summary>
+    async void PasteImage(Image img)
+    {
+        if (img == null) return;
+        byte[] png;
+        using (var ms = new MemoryStream()) { img.Save(ms, System.Drawing.Imaging.ImageFormat.Png); png = ms.ToArray(); }
+        img.Dispose();
+        busy = true;
+        UpdateButtons();
+        string text;
+        try { text = await Task.Run(() => ImageText.ReadAsync(png)); }
+        catch (Exception ex) { Ui.Warn("تعذرت قراءة الصورة: " + ex.Message); return; }
+        finally { busy = false; if (!IsDisposed) UpdateButtons(); }
+        if (IsDisposed) return;
+        if (text == null) { Ui.Warn(ImageText.NoEngine); return; }
+        AddText(text, "صورة ملصوقة");
     }
 
     void Drop(IDataObject data)
@@ -367,6 +413,7 @@ public class AnalyzeForm : BaseForm
         if (busy || !Session.Can("analyze")) return;
         if (data.GetData(DataFormats.FileDrop) is string[] files) AddFiles(files);
         else if (data.GetData(DataFormats.UnicodeText) is string text) AddText(text, "نص مسحوب");
+        else if (data.GetData(DataFormats.Bitmap) is Image img) PasteImage(img);
     }
 
     /// <summary>نافذة نص السجل: عرض السجل المحدد (مظللًا عند الدليل)، أو لصق/تعديل نص ثم تحليله</summary>
@@ -498,7 +545,7 @@ public class AnalyzeForm : BaseForm
             interview.Set(null, 0, Array.Empty<string>(), false);
             interview.Visible = false;
             deviceLine.Text = "لم يُفتح سجل بعد";
-            hint.Text = "افتح ملف panic-full من «فتح ملفات» أو الصق نصه من «لصق» — أو اسحب الملف إلى هنا.";
+            hint.Text = "افتح ملف panic-full من «فتح ملفات» أو الصق نصه من «لصق» — أو اسحب الملف أو لقطة شاشة للسجل إلى هنا.";
             causes.SetItems(Array.Empty<StackItem>());
             map.Set(null);
             steps.SetItems(Array.Empty<StackItem>());
