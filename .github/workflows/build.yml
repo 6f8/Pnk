@@ -1,0 +1,142 @@
+# بناء كاشف لويندوز بعد كل دفع: الاختبارات، فحص قارئ النصوص في الصور، ملف EXE كامل لا يحتاج تثبيت .NET،
+# المثبّت (Setup)، ولقطات شاشة من البرنامج وهو يعمل. على main تُنشر النسخة في صفحة Releases باسم «latest».
+name: build
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      DOTNET_NOLOGO: 1
+      VERSION: 1.0.${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: الاختبارات
+        run: dotnet run --project Kashif.Tests -c Release
+
+      - name: فحص قراءة صورة السجل (OCR ويندوز)
+        run: dotnet run --project Kashif.WinCheck -c Release
+
+      - name: بناء EXE كامل (لا يحتاج .NET)
+        run: >
+          dotnet publish Kashif/Kashif.csproj -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true
+          -p:Version=${{ env.VERSION }} -o publish
+
+      - name: المثبّت (Inno Setup)
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress | Out-Null
+          $iscc = Get-ChildItem "C:\Program Files (x86)\Inno Setup 6\ISCC.exe", "C:\Program Files\Inno Setup 6\ISCC.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $iscc) { throw "ISCC.exe not found" }
+          # ترجمة عربية لمعالج التثبيت (غير رسمية من مستودع Inno Setup) — إن تعذر تحميلها يبقى المعالج بالإنجليزية
+          try {
+            Invoke-WebRequest "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/Unofficial/Arabic.isl" -OutFile (Join-Path $iscc.DirectoryName "Languages\Arabic.isl")
+          } catch { Write-Warning "Arabic.isl: $_" }
+          & $iscc.FullName "/DAppVersion=$env:VERSION" "/DExeDir=..\publish" installer\Kashif.iss
+          if ($LASTEXITCODE -ne 0) { throw "iscc failed" }
+          Compress-Archive -Path publish\Kashif.exe -DestinationPath "dist\Kashif-portable-$env:VERSION.zip"
+
+      - name: لقطات شاشة من البرنامج
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          New-Item -ItemType Directory -Force shots | Out-Null
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing, UIAutomationClient, UIAutomationTypes
+          Add-Type @"
+          using System; using System.Runtime.InteropServices;
+          public static class Mouse {
+            [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+            [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint x, uint y, uint d, IntPtr e);
+            public static void Click(int x, int y) { SetCursorPos(x, y); mouse_event(2, 0, 0, 0, IntPtr.Zero); mouse_event(4, 0, 0, 0, IntPtr.Zero); }
+          }
+          "@
+          try { Set-DisplayResolution -Width 1920 -Height 1080 -Force -ErrorAction Stop } catch { Write-Warning "resolution: $_" }
+          function Shot($name) {
+            $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+            $bmp.Save("shots\$name.png"); $g.Dispose(); $bmp.Dispose()
+          }
+          function ClickByName($text) {
+            $root = [System.Windows.Automation.AutomationElement]::RootElement
+            $cond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $text)
+            $el = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond)
+            if (-not $el) { Write-Warning "not found: $text"; return $false }
+            $r = $el.Current.BoundingRectangle
+            [Mouse]::Click([int]($r.X + $r.Width / 2), [int]($r.Y + $r.Height / 2))
+            return $true
+          }
+          $sample = Resolve-Path "Kashif.Tests\Samples\smc_bsc_d64_screen_sensor.ips"
+          $p = Start-Process publish\Kashif.exe -ArgumentList "`"$sample`"" -PassThru
+          Start-Sleep 20
+          Shot "1-analysis"
+          if (ClickByName "الفحص والخطوات") { Start-Sleep 4; Shot "2-exam-and-steps"; [System.Windows.Forms.SendKeys]::SendWait("{ESC}"); Start-Sleep 2 }
+          if (ClickByName "الرئيسية") { Start-Sleep 4; Shot "3-home" }
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          # لقطة شاشة لصورة السجل التي قرأها فحص OCR
+          Copy-Item Kashif.WinCheck\bin\Release\*\ocr-sample.png shots\4-ocr-input.png -ErrorAction SilentlyContinue
+          Copy-Item Kashif.WinCheck\bin\Release\*\ocr-result.txt shots\4-ocr-result.txt -ErrorAction SilentlyContinue
+          Get-ChildItem shots
+
+      - name: رفع لقطات الشاشة إلى فرع ci-screenshots
+        if: always()
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          if (-not (Test-Path shots)) { exit 0 }
+          $d = Join-Path $env:RUNNER_TEMP "shots-repo"
+          git init -q $d
+          Copy-Item shots\* $d
+          Push-Location $d
+          git checkout -q -b ci-screenshots
+          git add -A
+          git -c user.name=kashif-ci -c user.email=ci@kashif.local commit -q -m "screenshots ${{ github.sha }} (${{ github.ref_name }})"
+          git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" ci-screenshots
+          Pop-Location
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Kashif-${{ env.VERSION }}
+          path: |
+            dist/*.exe
+            dist/*.zip
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots-${{ env.VERSION }}
+          path: shots/
+          if-no-files-found: ignore
+
+      - name: النشر في Releases (latest)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag 2>$null
+          $notes = "كاشف $env:VERSION — بُني تلقائيًا من main ($env:GITHUB_SHA).`n`n" +
+                   "- Kashif-Setup: المثبّت (اختصار في قائمة ابدأ وسطح المكتب، وربط ملفات .ips).`n" +
+                   "- Kashif-portable: ملف EXE واحد يعمل مباشرة بلا تثبيت ولا .NET.`n`n" +
+                   "تصميم وتطوير: يوسف أحمد — Telegram YsYsD · Instagram Gxp6 · 07764455011"
+          gh release create latest dist/*.exe dist/*.zip --title "كاشف $env:VERSION" --notes $notes --target $env:GITHUB_SHA --latest
