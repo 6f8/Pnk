@@ -14,6 +14,7 @@
   <ItemGroup>
     <Compile Include="..\Kashif\Core\Panic\*.cs" Link="Engine\%(Filename)%(Extension)" />
     <Compile Include="..\Kashif\Core\Device\*.cs" Link="Device\%(Filename)%(Extension)" />
+    <Compile Include="..\Kashif\Core\Updates.cs" Link="Engine\Updates.cs" />
     <EmbeddedResource Include="..\Kashif\Data\knowledge.json" LogicalName="Kashif.knowledge.json" />
     <None Include="Samples\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

@@ -22,6 +22,7 @@ static partial class Program
         Run("الآيفون: TLS بشهادة سجل الاقتران (PEM)", PairTls);
         Run("البطارية المقاسة واختبار العزل في الترتيب", BatteryAndIsolation);
         Run("مراقبة إعادة التشغيل بالكيبل", RebootWatching);
+        Run("التنبيه بنسخة جديدة", UpdateCheck);
     }
 
     static void PlistFormats()
@@ -138,6 +139,16 @@ static partial class Program
         Check(iso.Candidates.First(c => c.Part == Parts.ChargingFlex).Score == Math.Max(1, charge - 30), "فلاتة الشحن -30");
         PanicAnalyzer.ApplyIsolation(iso, "فلاتة لم تُذكر", true, "06:00");
         Check(iso.Evidence.Count(e => e.What == "اختبار العزل") == 3, "نص حر يُسجَّل دليلًا");
+    }
+
+    static void UpdateCheck()
+    {
+        var r = Updates.Parse("{\"name\":\"كاشف 1.0.12\",\"tag_name\":\"latest\",\"html_url\":\"https://github.com/6f8/Pnk/releases/tag/latest\"}");
+        Check(r?.Version == new Version(1, 0, 12) && r.Url.EndsWith("/latest"), "الإصدار من الاسم: " + r?.Version);
+        Check(Updates.IsNewer(r, "1.0.5+a98dd4d") && !Updates.IsNewer(r, "1.0.12") && !Updates.IsNewer(r, "1.1.0"), "المقارنة (1.0.12 أحدث من 1.0.5 وليس من 1.1.0)");
+        Check(!Updates.IsNewer(r, "1.0.12+abc"), "نفس النسخة");
+        Check(Updates.Parse("{\"message\":\"Not Found\"}") == null && Updates.Parse("not json") == null, "رد 404 أو نص تالف ← لا شيء");
+        Check(!Updates.IsNewer(null, "1.0.0"), "null ← لا تنبيه");
     }
 
     static void RebootWatching()

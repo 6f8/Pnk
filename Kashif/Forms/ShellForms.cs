@@ -269,6 +269,7 @@ public class MainForm : BaseForm
             if (Program.StartupFiles.Count > 0 && Session.Can("analyze")) AnalyzeForm.OpenFiles(Program.StartupFiles);
             timer.Start();
             RefreshAlerts(force: true);
+            CheckUpdates();
         };
         FormClosing += (s, e) =>
         {
@@ -346,6 +347,22 @@ public class MainForm : BaseForm
     // ---------- القائمة الجانبية ----------
     /// <summary>تصغير القائمة إلى شريط أيقونات (مساحة عمل أكبر مثل شاشة البيع) أو إعادتها كاملة؛ يُحفظ الاختيار</summary>
     public void ToggleSidebar() => SetRail(!rail, true);
+
+    /// <summary>مرة في اليوم: هل في GitHub نسخة أحدث؟ (بصمت إن لم يوجد اتصال أو كان المستودع خاصًا)</summary>
+    async void CheckUpdates()
+    {
+        if (Settings.Get("update_check", "1") != "1") return;
+        var today = DateTime.Today.ToString("yyyy-MM-dd");
+        if (Settings.Get("update_checked") == today) return;
+        var r = await Updates.LatestAsync();
+        if (IsDisposed) return;
+        try { Settings.Set("update_checked", today); } catch { }
+        if (!Updates.IsNewer(r, Application.ProductVersion)) return;
+        var current = Application.ProductVersion.Split('+')[0];
+        if (Dialogs.Message($"صدرت نسخة جديدة من كاشف: {r.Version}\nنسختك الحالية: {current}\n\nنزّل المثبّت من صفحة النسخة وشغّله — بياناتك وفحوصاتك تبقى كما هي.",
+                "نسخة جديدة", Tone.Info, ("لاحقًا", DialogResult.Cancel, BtnKind.Secondary), ("فتح صفحة التنزيل", DialogResult.OK, BtnKind.Primary)) == DialogResult.OK)
+            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(r.Url) { UseShellExecute = true }); } catch { }
+    }
 
     void SetRail(bool on, bool save)
     {

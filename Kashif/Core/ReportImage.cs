@@ -41,7 +41,7 @@ public static class ReportImage
 
         int y = cardPad + H(c.Shop, title) + 12 + H(c.Date, small) + 40 + 2 + 40;
         foreach (var (lb, tx, st) in rows) y += H(lb, label) + 10 + H(tx, st ? strong : body) + 40;
-        y += H(c.Note, note) + 28 + 40 + cardPad;
+        y += H(c.Note, note) + 14 + cardPad;
         int height = y + 2 * pad;
 
         var bmp = new Bitmap(width, height, PixelFormat.Format24bppRgb);
@@ -96,7 +96,9 @@ public static class ReportImage
     /// <summary>محتوى التقرير من التشخيص: نفس كلمات تقرير الزبون النصي</summary>
     public static Content From(Diagnosis d, string shop, string fixedPart, DateTime date)
     {
-        var cause = d.TopPart == "" ? "يُحدَّد بالفحص العملي." : d.TopPart + (d.Candidates.Count > 1 && !d.Summary.StartsWith("مؤكد بالفحص", StringComparison.Ordinal) ? $" (وقد يكون: {d.Candidates[1].Part})" : "");
+        // بعد الإصلاح السبب معروف: لا «وقد يكون»
+        bool settled = d.Summary.StartsWith("مؤكد بالفحص", StringComparison.Ordinal) || !string.IsNullOrWhiteSpace(fixedPart);
+        var cause = d.TopPart == "" ? "يُحدَّد بالفحص العملي." : d.TopPart + (d.Candidates.Count > 1 && !settled ? $" (وقد يكون: {d.Candidates[1].Part})" : "");
         if (d.Summary.StartsWith("مؤكد بالفحص", StringComparison.Ordinal)) cause += " — تأكدنا منه بالفحص العملي.";
         return new Content(
             string.IsNullOrWhiteSpace(shop) ? "تقرير فحص الجهاز" : shop.Trim(),
