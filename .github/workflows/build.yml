@@ -4,7 +4,7 @@ name: build
 
 on:
   push:
-    branches: [main, "claude/**"]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -31,9 +31,6 @@ jobs:
 
       - name: الاختبارات
         run: dotnet run --project Kashif.Tests -c Release
-
-      - name: فحص قراءة صورة السجل (OCR ويندوز)
-        run: dotnet run --project Kashif.WinCheck -c Release
 
       - name: بناء EXE كامل (لا يحتاج .NET)
         run: >
@@ -93,9 +90,6 @@ jobs:
           if (ClickByName "الفحص والخطوات") { Start-Sleep 4; Shot "2-exam-and-steps"; [System.Windows.Forms.SendKeys]::SendWait("{ESC}"); Start-Sleep 2 }
           if (ClickByName "الرئيسية") { Start-Sleep 4; Shot "3-home" }
           Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-          # لقطة شاشة لصورة السجل التي قرأها فحص OCR
-          Copy-Item Kashif.WinCheck\bin\Release\*\ocr-sample.png shots\4-ocr-input.png -ErrorAction SilentlyContinue
-          Copy-Item Kashif.WinCheck\bin\Release\*\ocr-result.txt shots\4-ocr-result.txt -ErrorAction SilentlyContinue
           Get-ChildItem shots
 
       - name: رفع لقطات الشاشة إلى فرع ci-screenshots
@@ -127,6 +121,10 @@ jobs:
           name: screenshots-${{ env.VERSION }}
           path: shots/
           if-no-files-found: ignore
+
+      - name: فحص قراءة صورة السجل (OCR ويندوز)
+        id: ocr
+        run: dotnet run --project Kashif.WinCheck -c Release
 
       - name: النشر في Releases (latest)
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
