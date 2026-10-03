@@ -20,6 +20,7 @@ static partial class Program
         Run("البصمة الدقيقة على نفس الموديل", DetailKeys);
         Run("إصدار iOS بين السجلات والقطعة المشتركة", BuildsAndShared);
         Run("ما يحسم بين أعلى سببين", Decider);
+        Run("الحل المختصر: نهائي فقط عند الثقة العالية", ShortSolution);
         Run("البطارية غير الأصلية من السعة المبرمجة", BatteryOrigin);
         Run("إخفاء معرّفات الجهاز دون تغيير التشخيص", Anonymize);
         Run("السجلات ونتائجها المتوقعة (.expected)", ExpectedSamples);
@@ -430,7 +431,7 @@ static partial class Program
         var raw = Sample("smc_d94_ocr.txt");
         var d = PanicAnalyzer.Analyze(PanicParser.Parse(raw, "smc"));
         var cr = PanicAnalyzer.CustomerReport(d, "محل النور");
-        Check(cr.Contains("محل النور") && cr.Contains("iPhone 16 Pro Max") && cr.Contains(d.TopPart) && !cr.Contains("0x") && !cr.Contains("SMC"), "تقرير الزبون بسيط بلا رموز");
+        Check(cr.Contains("محل النور") && cr.Contains("iPhone 16 Pro Max") && cr.Contains(PanicAnalyzer.Solve(d).Customer) && !cr.Contains("0x") && !cr.Contains("SMC"), "تقرير الزبون بسيط بلا رموز");
         int found = 0, total = 0;
         foreach (var e in d.Evidence.Where(e => !string.IsNullOrEmpty(e.Needle)))
         {
@@ -660,6 +661,28 @@ static partial class Program
         sensor.MissingSensors.Add("mic1");
         var text = PanicAnalyzer.WhatDecides(sensor);
         Check(text != "", "حساس مفقود متقارب: " + text);
+    }
+
+    static void ShortSolution()
+    {
+        var mic = PanicAnalyzer.Analyze(PanicParser.ParseMany(Sample("mic1_iphonex_valid.ips"), "m")[0]);
+        var s = PanicAnalyzer.Solve(mic);
+        Check(s.Final && s.Action == "بدّل فلاتة الشحن" && s.Reason.StartsWith("mic1"), $"mic1 مؤكد ← {s.Action} — {s.Reason}");
+        Check(s.Customer == "العطل في فلاتة الشحن، والإصلاح بتبديلها.", "جملة الزبون: " + s.Customer);
+        Check(PanicAnalyzer.MainCauses(mic, true).Count == 1, "النهائي سبب واحد");
+
+        var smc = PanicAnalyzer.Analyze(PanicParser.ParseMany(Sample("smc_bsc_d64_screen_sensor.ips"), "s")[0]);
+        var u = PanicAnalyzer.Solve(smc);
+        Check(!u.Final && !u.Action.StartsWith("بدّل"), "غير المؤكد لا يبدأ بالتبديل: " + u.Action);
+        Check(u.Customer.Contains("يُؤكَّد بفحص عملي"), "الزبون: غير نهائي");
+        var main = PanicAnalyzer.MainCauses(smc, false);
+        Check(main.Count is >= 1 and <= 3 && main.All(c => c.Score >= smc.Candidates[0].Score - 20), "الأسباب القريبة فقط (حتى 3)");
+
+        var empty = PanicAnalyzer.Solve(new Diagnosis());
+        Check(!empty.Final && empty.Action.StartsWith("لا يكفي"), "بلا أسباب ← لا حكم");
+        Check(PanicAnalyzer.ShortName(Parts.Biometric, new Diagnosis { Product = "iPhone12,8" }) == "Touch ID", "SE 2 ← Touch ID");
+        Check(PanicAnalyzer.ShortName(Parts.Biometric, new Diagnosis { Product = "iPhone14,2" }) == "Face ID", "13 Pro ← Face ID");
+        Check(Parts.All.All(p => PanicAnalyzer.ShortName(p) != "" && PanicAnalyzer.ShortName(p).Length <= 30), "كل قطعة لها اسم مختصر");
     }
 
     static void BatteryOrigin()

@@ -98,8 +98,9 @@ public static class ReportImage
     {
         // بعد الإصلاح السبب معروف: لا «وقد يكون»
         bool settled = d.Summary.StartsWith("مؤكد بالفحص", StringComparison.Ordinal) || !string.IsNullOrWhiteSpace(fixedPart);
-        var cause = d.TopPart == "" ? "يُحدَّد بالفحص العملي." : d.TopPart + (d.Candidates.Count > 1 && !settled ? $" (وقد يكون: {d.Candidates[1].Part})" : "");
-        if (d.Summary.StartsWith("مؤكد بالفحص", StringComparison.Ordinal)) cause += " — تأكدنا منه بالفحص العملي.";
+        // جملة واحدة: العطل وإصلاحه (أو «يُؤكَّد بفحص عملي» إن لم يكن نهائيًا)
+        var cause = d.TopPart == "" ? "يُحدَّد بالفحص العملي." : !string.IsNullOrWhiteSpace(fixedPart) ? d.TopPart : PanicAnalyzer.Solve(d).Customer;
+        if (settled && d.Summary.StartsWith("مؤكد بالفحص", StringComparison.Ordinal)) cause += " — تأكدنا منه بالفحص العملي.";
         return new Content(
             string.IsNullOrWhiteSpace(shop) ? "تقرير فحص الجهاز" : shop.Trim(),
             date.ToString("yyyy/MM/dd"),

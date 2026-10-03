@@ -28,6 +28,13 @@ public class AnalyzeForm : BaseForm
     readonly DeviceMap map = new() { Dock = DockStyle.Fill };
     readonly Label deviceLine = new() { Dock = DockStyle.Top, Height = 28, AutoSize = false, Font = Theme.F(11), ForeColor = Palette6.Muted, TextAlign = ContentAlignment.MiddleLeft };
     readonly Label heading = new() { Dock = DockStyle.Top, Height = 60, AutoSize = false, Text = "أين العطل داخل الجهاز؟", Font = Theme.F(21, FontStyle.Bold), ForeColor = Palette6.Ink, TextAlign = ContentAlignment.MiddleLeft };
+    // الحل المختصر: ماذا تفعل (سطر كبير) ولماذا والثقة (سطر صغير)
+    readonly Panel solutionBox = new() { Dock = DockStyle.Top, Height = 104, BackColor = Palette6.Card, Padding = new Padding(18, 12, 18, 10), Visible = false };
+    readonly Label solutionAction = new() { Dock = DockStyle.Top, Height = 54, AutoSize = false, Font = Theme.F(15, FontStyle.Bold), ForeColor = Palette6.Ink, TextAlign = ContentAlignment.TopLeft, AutoEllipsis = true };
+    readonly Label solutionReason = new() { Dock = DockStyle.Fill, AutoSize = false, Font = Theme.F(10.5f), ForeColor = Palette6.Muted, TextAlign = ContentAlignment.TopLeft, AutoEllipsis = true };
+    readonly LinkLabel moreCauses = new() { Dock = DockStyle.Bottom, Height = 34, AutoSize = false, Font = Theme.F(11), TextAlign = ContentAlignment.MiddleLeft, Visible = false, LinkBehavior = LinkBehavior.HoverUnderline };
+    bool allCauses;
+    PanicAnalyzer.Solution solution;
     readonly Label hint = new() { Dock = DockStyle.Top, Height = 58, AutoSize = false, Font = Theme.F(11.5f), ForeColor = Palette6.Muted, TextAlign = ContentAlignment.TopLeft };
     readonly FlowLayoutPanel flags = new() { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Theme.Surface, WrapContents = true, Padding = new Padding(4, 5, 4, 0) };
     readonly TableLayoutPanel lists = new() { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = Theme.Surface, Margin = new Padding(0) };
@@ -155,9 +162,15 @@ public class AnalyzeForm : BaseForm
         // النقر على سبب أو قطعة يفتح «الفحص والخطوات»: دليلها، الخلاصة، ما حدث للجهاز، سؤال الفحص، الخطوات، الأدلة.
         var main = new Panel { Dock = DockStyle.Fill, BackColor = Palette6.Ground, Margin = new Padding(0) };
         main.Controls.Add(causes);
+        main.Controls.Add(moreCauses);
         main.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 14, BackColor = Palette6.Ground });
         main.Controls.Add(hint);
+        main.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 10, BackColor = Palette6.Ground });
+        solutionBox.Controls.Add(solutionReason);
+        solutionBox.Controls.Add(solutionAction);
+        main.Controls.Add(solutionBox);
         main.Controls.Add(heading);
+        moreCauses.LinkClicked += (s, e) => { allCauses = !allCauses; FillCauses(); };
         main.Controls.Add(deviceLine);
 
         var columns = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = Palette6.Ground };
@@ -208,7 +221,7 @@ public class AnalyzeForm : BaseForm
         bLogs.Click += (s, e) => { logsToggledByUser = true; SetLogsVisible(!logsCard.Visible); };
         bRemove.Click += (s, e) => RemoveSelected();
         tCombine.CheckedChanged += (s, e) => ShowResult();
-        tAllEvidence.CheckedChanged += (s, e) => FillEvidence();
+        tAllEvidence.CheckedChanged += (s, e) => { FillEvidence(); FillSteps(); };
         foreach (var t in new[] { tLiquid, tBattery, tFlex, tScreen, tDrop }) t.CheckedChanged += (s, e) => { if (!loading) { dirty = true; Reanalyze(); } };
         repairDate.ValueChanged += (s, e) => { if (!loading) { dirty = true; ShowResult(); } };
         logsGrid.SelectionChanged += (s, e) => { if (!loading) ShowResult(); };
@@ -744,6 +757,9 @@ public class AnalyzeForm : BaseForm
             hint.ForeColor = Palette6.Muted;
             hint.Height = 58;
             causes.SetItems(Array.Empty<StackItem>());
+            solution = null;
+            solutionBox.Visible = false;
+            moreCauses.Visible = false;
             map.Set(null);
             steps.SetItems(Array.Empty<StackItem>());
             evidence.SetItems(Array.Empty<StackItem>());
@@ -816,26 +832,52 @@ public class AnalyzeForm : BaseForm
 
         deviceLine.Text = string.Join(" · ", new[] { shown.Device, shown.Title }.Where(x => !string.IsNullOrWhiteSpace(x)));
         shown.Decider = PanicAnalyzer.WhatDecides(shown, answers);
+        solution = PanicAnalyzer.Solve(shown, answers);
+        solutionBox.Visible = shown.Candidates.Count > 0;
+        solutionAction.Text = (solution.Final ? "✔ " : "← ") + solution.Action;
+        solutionReason.Text = string.Join(" · ", new[] { solution.Reason, "الثقة: " + solution.Confidence + (solution.Final ? " — لا يحتاج فحصًا آخر" : " — نفّذ هذه الخطوة أولًا") }.Where(x => x != ""));
         hint.Text = shown.Decider != "" ? "⚖ " + shown.Decider : "اللون الأغمق = الأرجح. اضغط على أي قطعة لترى الدليل وخطوة فحصها.";
         hint.ForeColor = shown.Decider != "" ? Palette6.Ink : Palette6.Muted;
         hint.Height = shown.Decider != "" ? 90 : 58;
 
-        causes.SetItems(shown.Candidates.Select((c, k) =>
+        allCauses = false;
+        FillCauses();
+        map.Set(shown);
+        FillSteps();
+        FillEvidence();
+        UpdateButtons();
+    }
+
+    /// <summary>الأسباب الرئيسية فقط (النهائي سبب واحد، وغيره القريبة من الأول حتى 3) — والباقي خلف «أسباب أخرى»</summary>
+    void FillCauses()
+    {
+        var all = shown?.Candidates ?? new List<Candidate>();
+        var main = PanicAnalyzer.MainCauses(shown, solution?.Final == true);
+        var list = allCauses ? all : main;
+        causes.SetItems(list.Select((c, k) =>
         {
             var card = new CauseButton(k + 1, c);
             card.Click += (o, e) => { map.Select(card.Part); ShowDetails(card.Part); };
             return (StackItem)card;
         }));
-        map.Set(shown);
-        steps.SetItems(shown.Steps.Select((s, k) =>
+        int hidden = all.Count - main.Count;
+        moreCauses.Visible = hidden > 0;
+        moreCauses.Text = allCauses ? "إخفاء الأسباب الأخرى" : $"أسباب أخرى ({hidden}) — أبعد احتمالًا";
+    }
+
+    /// <summary>ثلاث خطوات (أو خطوة واحدة إذا كان الحل نهائيًا) — كلها مع «كل التفاصيل»</summary>
+    void FillSteps()
+    {
+        if (shown == null) { steps.SetItems(Array.Empty<StackItem>()); return; }
+        int limit = tAllEvidence.Checked ? int.MaxValue : solution?.Final == true ? 1 : 3;
+        steps.SetItems(shown.Steps.Take(limit).Select((s, k) =>
         {
             var card = new StepCard(k + 1, s, doneSteps.Contains(s));
             card.DoneChanged += (o, e) => { if (card.Done) doneSteps.Add(card.StepText); else doneSteps.Remove(card.StepText); };
             return (StackItem)card;
         }));
-        stepsCard.Subtitle = shown.Steps.Count == 0 ? "" : $"{shown.Steps.Count} خطوات — انقر على الخطوة عند إنجازها";
-        FillEvidence();
-        UpdateButtons();
+        int more = shown.Steps.Count - Math.Min(limit, shown.Steps.Count);
+        stepsCard.Subtitle = shown.Steps.Count == 0 ? "" : more > 0 ? $"انقر على الخطوة عند إنجازها — و{more} خطوات أخرى في «كل التفاصيل»" : "انقر على الخطوة عند إنجازها";
     }
 
     /// <summary>الأدلة الأساسية وأجوبة الفحص — ومعلومات السجل الإضافية عند تفعيل «كل التفاصيل»</summary>
@@ -963,7 +1005,7 @@ public class AnalyzeForm : BaseForm
         if (forCustomer)
         {
             doc.Text("المشكلة: " + PanicAnalyzer.CustomerProblem(d), 11);
-            if (d.TopPart != "") doc.Text("السبب المرجّح: " + d.TopPart + (d.Candidates.Count > 1 ? " (وقد يكون: " + d.Candidates[1].Part + ")" : ""), 11, true);
+            if (d.TopPart != "") doc.Text(PanicAnalyzer.Solve(d, answers).Customer, 11, true);
             doc.Text("درجة الثقة: " + d.Confidence + (d.Summary.StartsWith("مؤكد بالفحص", StringComparison.Ordinal) ? " — مؤكد بالفحص العملي" : ""), 10);
             if (fixedPartText.Trim() != "") doc.Text("ما تم إصلاحه: " + fixedPartText.Trim(), 11, true);
             doc.Space(8);

@@ -608,30 +608,133 @@ public static class PanicAnalyzer
     /// </summary>
     public static string WhatDecides(Diagnosis d, IReadOnlyList<(string Id, int Answer)> answers = null)
     {
-        if (d == null || d.Candidates.Count < 2 || d.Summary.StartsWith("مؤكد بالفحص", StringComparison.Ordinal)) return "";
+        if (d == null || d.Candidates.Count < 2 || Confirmed(d)) return "";
         var (a, b) = (d.Candidates[0], d.Candidates[1]);
         if (a.Score - b.Score >= 15) return "";
         string head = $"«{a.Part}» و«{b.Part}» متقاربان. ";
-        var done = (answers ?? Array.Empty<(string, int)>()).Select(x => x.Id).ToHashSet();
-        int Effect(PanicKnowledge.AnswerOption o, string part) => o.Effects.TryGetValue(part, out var v) ? v : 0;
-        var q = PanicKnowledge.Current.Questions
-            .Where(x => !done.Contains(x.Id) && x.Answers.Any(o => Math.Abs(Effect(o, a.Part) - Effect(o, b.Part)) >= 20))
-            .OrderByDescending(x => x.Free).ThenByDescending(x => x.Priority).ThenBy(x => x.Id, StringComparer.Ordinal).FirstOrDefault();
+        var (q, sensorLog, off, rest) = Decide(d, answers);
         if (q != null)
         {
             var splits = q.Answers.Where(o => Math.Abs(Effect(o, a.Part) - Effect(o, b.Part)) >= 20).Take(2)
                 .Select(o => $"«{o.Label}» ← {(Effect(o, a.Part) > Effect(o, b.Part) ? a.Part : b.Part)}");
             return head + $"يحسم بينهما سؤال الفحص: {q.Text} — " + string.Join("؛ ", splits) + ".";
         }
-        if (d.LogCount == 1 && d.MissingSensors.Count > 0 && (a.Part == Parts.Board || b.Part == Parts.Board))
-        {
-            var other = a.Part == Parts.Board ? b.Part : a.Part;
-            return head + $"يحسم بينهما سجل آخر من نفس الجهاز: نفس الحساس ({string.Join("، ", d.MissingSensors)}) ← «{other}»؛ حساس مختلف ← خط مشترك على البوردة.";
-        }
-        var off = Detachable.Contains(a.Part) ? (a, b) : Detachable.Contains(b.Part) ? (b, a) : default;
-        if (off.Item1 != null)
-            return head + $"يحسم بينهما اختبار العزل: افصل «{off.Item1.Part}» وشغّل الجهاز — توقف الانهيار ← هي السبب؛ استمر ← «{off.Item2.Part}».";
+        if (sensorLog != null)
+            return head + $"يحسم بينهما سجل آخر من نفس الجهاز: نفس الحساس ({string.Join("، ", d.MissingSensors)}) ← «{sensorLog}»؛ حساس مختلف ← خط مشترك على البوردة.";
+        if (off != null)
+            return head + $"يحسم بينهما اختبار العزل: افصل «{off}» وشغّل الجهاز — توقف الانهيار ← هي السبب؛ استمر ← «{rest}».";
         return head + "لا يفصل بينهما شيء في السجل نفسه — سجل آخر من نفس الجهاز بعد ظهور البانك مرة ثانية يحسم الترتيب.";
+    }
+
+    static int Effect(PanicKnowledge.AnswerOption o, string part) => o.Effects.TryGetValue(part, out var v) ? v : 0;
+
+    static bool Confirmed(Diagnosis d) => d.Summary.StartsWith("مؤكد بالفحص", StringComparison.Ordinal);
+
+    /// <summary>الفاصل بين أعلى سببين: سؤال فحص، أو سجل آخر (القطعة غير البوردة)، أو القطعة التي تُفصل والأخرى</summary>
+    static (PanicKnowledge.Question Q, string SensorLog, string Off, string Other) Decide(Diagnosis d, IReadOnlyList<(string Id, int Answer)> answers)
+    {
+        var (a, b) = (d.Candidates[0].Part, d.Candidates.Count > 1 ? d.Candidates[1].Part : "");
+        var done = (answers ?? Array.Empty<(string, int)>()).Select(x => x.Id).ToHashSet();
+        var q = b == "" ? null : PanicKnowledge.Current.Questions
+            .Where(x => !done.Contains(x.Id) && x.Answers.Any(o => Math.Abs(Effect(o, a) - Effect(o, b)) >= 20))
+            .OrderByDescending(x => x.Free).ThenByDescending(x => x.Priority).ThenBy(x => x.Id, StringComparer.Ordinal).FirstOrDefault();
+        if (q != null) return (q, null, null, null);
+        if (d.LogCount == 1 && d.MissingSensors.Count > 0 && (a == Parts.Board || b == Parts.Board))
+            return (null, a == Parts.Board ? b : a, null, null);
+        if (Detachable.Contains(a)) return (null, null, a, b);
+        if (Detachable.Contains(b)) return (null, null, b, a);
+        return (null, null, null, null);
+    }
+
+    /// <summary>الحل المختصر: ماذا تفعل، لماذا (من السجل)، الثقة، وهل هو نهائي — وجملة واحدة للزبون</summary>
+    public sealed record Solution(string Action, string Reason, string Confidence, bool Final, string Customer);
+
+    /// <summary>
+    /// نهائي فقط إذا كانت الثقة «عالية» والأول «الأرجح» (متقدم بوضوح) — عندها قطعة واحدة وإجراء واحد.
+    /// غير ذلك: الإجراء هو الخطوة الواحدة التي تحسم الترتيب (سؤال، سجل آخر، فصل قطعة)، ولا يُقال «بدّل» قبلها.
+    /// </summary>
+    public static Solution Solve(Diagnosis d, IReadOnlyList<(string Id, int Answer)> answers = null)
+    {
+        if (d == null || d.Candidates.Count == 0)
+            return new("لا يكفي السجل لتحديد السبب", d?.Title ?? "", d?.Confidence ?? "منخفضة", false, "يحتاج الجهاز فحصًا عمليًا لتحديد السبب.");
+        var top = d.Candidates[0];
+        string name = ShortName(top.Part, d);
+        string reason = Cut(top.Why.Split(" — ")[0].Trim(), 140);
+        bool final = d.Confidence == "عالية" && top.Label == "الأرجح";
+        if (final)
+            return new(FixVerb(top.Part, name), reason, d.Confidence, true, CustomerFix(top.Part, name, true));
+
+        string wait = Count(Math.Ceiling(Kashif.Device.RebootWatch.LimitFor(d.UptimeSeconds).TotalMinutes), "دقيقة", "دقائق");
+        var (q, sensorLog, off, _) = Decide(d, answers);
+        bool close = d.Candidates.Count > 1 && top.Score - d.Candidates[1].Score < 15;
+        string action =
+            close && q != null ? "أجب عن سؤال الفحص: " + q.Text
+            : close && sensorLog != null ? "اجمع سجل بانك ثانيًا من نفس الجهاز: نفس الحساس ← " + ShortName(sensorLog, d) + "، حساس مختلف ← البوردة"
+            : close && off != null ? $"افصل {ShortName(off, d)} وشغّل الجهاز {wait}: توقف الانهيار ← هي السبب"
+            : Detachable.Contains(top.Part) ? $"تأكد قبل التبديل: افصل {name} وشغّل الجهاز {wait} — إن توقف الانهيار فبدّلها"
+            : top.Part == Parts.Ios ? "أعد تثبيت iOS عبر الكمبيوتر (بلا استعادة النسخة الاحتياطية) وراقب الجهاز"
+            : q != null ? "أجب عن سؤال الفحص: " + q.Text
+            : $"افحص {name}";
+        return new(action, reason, d.Confidence, false, CustomerFix(top.Part, name, false));
+    }
+
+    static string FixVerb(string part, string name) => part switch
+    {
+        Parts.Ios => "أعد تثبيت iOS عبر الكمبيوتر",
+        Parts.Liquid => "نظّف التأكسد في الموصلات والفلاتات (كحول 99%) قبل أي تبديل",
+        Parts.LastPart => "أعد تركيب آخر قطعة استُبدلت أو بدّلها بقطعة أصلية",
+        Parts.Accessory => "جرّب شاحنًا وكيبلًا سليمين",
+        Parts.Board or Parts.SmcLine or Parts.SocRam or Parts.Pmu or Parts.ChargeIc or Parts.AudioIc or Parts.Baseband or Parts.Nand or Parts.Wifi or Parts.Sensors
+            => $"أصلح {name} (عمل على البوردة)",
+        _ => "بدّل " + name,
+    };
+
+    static string CustomerFix(string part, string name, bool final) =>
+        part == Parts.Ios ? (final ? "العطل برمجي، والإصلاح بإعادة تثبيت النظام." : "العطل على الأرجح برمجي، ويُؤكَّد بإعادة تثبيت النظام.")
+        : final ? $"العطل في {name}، والإصلاح ب{FixVerb(part, name) switch { var v when v.StartsWith("بدّل ") => "تبديلها", var v when v.StartsWith("أصلح ") => "إصلاحها على اللوحة الأم", _ => "معالجتها" }}."
+        : $"العطل على الأرجح في {name}، ويُؤكَّد بفحص عملي قبل الإصلاح.";
+
+    /// <summary>اسم القطعة المختصر — Face ID أو Touch ID حسب جيل الموديل</summary>
+    public static string ShortName(string part, Diagnosis d = null) => part switch
+    {
+        Parts.ChargingFlex => "فلاتة الشحن",
+        Parts.PowerFlex => "فلاتة زر التشغيل",
+        Parts.FrontFlex => "فلاتة الحساسات الأمامية",
+        Parts.BatteryConn => "موصل البطارية",
+        Parts.Board => "البوردة",
+        Parts.SmcLine => "خط SMC للبطارية على البوردة",
+        Parts.Ios => "نظام iOS",
+        Parts.Screen => "الشاشة",
+        Parts.Biometric => AppleDevices.FamilyOf(d?.Product ?? "", d?.Log?.PanicString) switch
+        {
+            AppleDevices.Family.Early => "Touch ID",
+            AppleDevices.Family.X11 or AppleDevices.Family.Later => "Face ID",
+            _ => "Face ID / Touch ID",
+        },
+        Parts.TouchId => "زر البصمة",
+        Parts.Nand => "الذاكرة NAND",
+        Parts.Wifi => "شريحة الواي فاي",
+        Parts.Baseband => "البيسباند",
+        Parts.Camera => "الكاميرا",
+        Parts.ChargeIc => "آيسي الشحن",
+        Parts.AudioIc => "آيسي الصوت",
+        Parts.AudioParts => "السماعات أو الميكروفونات",
+        Parts.Pmu => "آيسي الطاقة PMU",
+        Parts.SocRam => "المعالج أو RAM",
+        Parts.Liquid => "التأكسد",
+        Parts.LastPart => "آخر قطعة استُبدلت",
+        Parts.Accessory => "الشاحن أو الكيبل",
+        Parts.Sensors => "حساسات الحركة",
+        _ => part,
+    };
+
+    /// <summary>الأسباب المعروضة: النهائي سبب واحد؛ غيره القريبة من الأول (20 درجة) بحد أقصى 3</summary>
+    public static List<Candidate> MainCauses(Diagnosis d, bool final)
+    {
+        if (d == null || d.Candidates.Count == 0) return new();
+        if (final) return d.Candidates.Take(1).ToList();
+        int top = d.Candidates[0].Score;
+        return d.Candidates.Where(c => c.Score >= top - 20).Take(3).ToList();
     }
 
     public static string EncodeAnswers(IEnumerable<(string Id, int Answer)> answers) =>
@@ -1359,6 +1462,8 @@ public static class PanicAnalyzer
         if (d.LogCount > 1) Line("عدد السجلات", d.LogCount.ToString(CultureInfo.InvariantCulture));
         Line("بصمة النمط", d.Signature);
         sb.AppendLine();
+        var sol = Solve(d);
+        Line(sol.Final ? "الحل" : "الخطوة التالية", sol.Action + (sol.Reason != "" ? " — " + sol.Reason : ""));
         Line("التشخيص", d.Title);
         Line("الخلاصة", d.Summary);
         Line("درجة الثقة", d.Confidence);
@@ -1418,8 +1523,8 @@ public static class PanicAnalyzer
         sb.AppendLine("تقرير فحص الجهاز" + (string.IsNullOrWhiteSpace(shopName) ? "" : " — " + shopName));
         sb.AppendLine();
         if (d.Device != "") sb.AppendLine("الجهاز: " + d.Device);
+        sb.AppendLine(Solve(d).Customer);
         sb.AppendLine("المشكلة: " + CustomerProblem(d));
-        if (d.TopPart != "") sb.AppendLine("السبب المرجّح: " + d.TopPart + (d.Candidates.Count > 1 ? " (وقد يكون: " + d.Candidates[1].Part + ")" : ""));
         sb.AppendLine("درجة الثقة: " + d.Confidence + (d.LogCount > 1 ? $" (من {d.LogCount} سجلات)" : ""));
         sb.AppendLine();
         sb.AppendLine("ملاحظة: التشخيص مبني على سجل الأعطال الذي يحفظه الجهاز، ويُؤكَّد بالفحص العملي قبل تبديل أي قطعة.");
