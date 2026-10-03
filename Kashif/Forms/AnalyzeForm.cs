@@ -106,6 +106,7 @@ public class AnalyzeForm : BaseForm
         foreach (var b in bar.Controls.OfType<ModernButton>()) { b.Height = 40; b.Margin = new Padding(4, 3, 4, 3); }
         moreMenu.Font = Theme.F(10.5f);
         moreMenu.Items.Add("اختبار العزل (وضع الطاولة)", null, (s, e) => ShowIsolation());
+        moreMenu.Items.Add("الجهاز لا يقلع (فحص وضع الاستعادة و DFU)", null, (s, e) => CheckBootMode());
         moreMenu.Items.Add("حفظ سجل تشخيص الاتصال (للمطور)", null, (s, e) => SaveDeviceTrace());
         moreMenu.Items.Add("السجل المباشر من الآيفون", null, (s, e) => { using var f = new LiveLogForm(); f.ShowDialog(Form.ActiveForm ?? FindForm()); });
         moreMenu.Items.Add("فحص الجهاز بالكيبل (الهوية، البطارية، الشحن)", null, (s, e) => InspectDevice());
@@ -467,6 +468,29 @@ public class AnalyzeForm : BaseForm
         var msg = ex is Kashif.Device.DeviceException ? ex.Message : $"تعذر {title}: {ex.Message}";
         if (path != null) msg += $"\n\nحُفظ سجل تشخيص الاتصال في:\n{path}\nإن تكرر الخطأ أرسل هذا الملف للمطور — لا يحتوي بيانات الزبون.";
         Dialogs.Warn(msg, title);
+    }
+
+    /// <summary>الجهاز لا يقلع: هل يراه ويندوز، وفي أي وضع (يعمل، استعادة، DFU)، والخطوات المناسبة</summary>
+    async void CheckBootMode()
+    {
+        while (true)
+        {
+            Kashif.Device.DeviceTrace.Begin("فحص وضع الإقلاع");
+            var (ids, sees) = await Task.Run(() =>
+            {
+                var list = Kashif.Device.BootMode.QueryWindows();
+                bool usbmux = false;
+                try { usbmux = new Kashif.Device.Usbmux().ListDevices().Count > 0; } catch { }
+                return (list, usbmux);
+            });
+            if (IsDisposed) return;
+            var mode = sees ? Kashif.Device.BootMode.Mode.Normal : Kashif.Device.BootMode.FromPnpIds(ids);
+            var (title, steps) = Kashif.Device.BootMode.Guidance(mode, sees);
+            var text = (ids == null ? "تعذر سؤال ويندوز عن أجهزة USB — النتيجة من خدمة Apple فقط.\n\n" : "") +
+                string.Join("\n", steps.Select((x, i) => $"{i + 1}. {x}"));
+            var r = Dialogs.Message(text, title, Tone.Info, ("إغلاق", DialogResult.Cancel, BtnKind.Secondary), ("إعادة الفحص", DialogResult.Retry, BtnKind.Primary));
+            if (r != DialogResult.Retry) return;
+        }
     }
 
     /// <summary>من «المزيد»: حفظ آخر سجل تشخيص اتصال وفتح مجلده</summary>

@@ -24,6 +24,7 @@ static partial class Program
         Run("مراقبة إعادة التشغيل بالكيبل", RebootWatching);
         Run("الشحن مقاسًا بالكيبل", ChargingChecks);
         Run("السجل المباشر من الآيفون", LiveSyslog);
+        Run("الجهاز لا يقلع: وضع الاستعادة و DFU", BootModes);
         Run("التنبيه بنسخة جديدة", UpdateCheck);
     }
 
@@ -163,6 +164,19 @@ static partial class Program
         Check(!Updates.IsNewer(r, "1.0.12+abc"), "نفس النسخة");
         Check(Updates.Parse("{\"message\":\"Not Found\"}") == null && Updates.Parse("not json") == null, "رد 404 أو نص تالف ← لا شيء");
         Check(!Updates.IsNewer(null, "1.0.0"), "null ← لا تنبيه");
+    }
+
+    static void BootModes()
+    {
+        Check(BootMode.FromPnpIds(new[] { @"USB\VID_05AC&PID_1281\000000000001" }) == BootMode.Mode.Recovery, "0x1281 ← استعادة");
+        Check(BootMode.FromPnpIds(new[] { @"USB\VID_05AC&PID_1227\CPID:8110" }) == BootMode.Mode.Dfu, "0x1227 ← DFU");
+        Check(BootMode.FromPnpIds(new[] { @"USB\VID_05AC&PID_12A8\00008110000A1B2C" }) == BootMode.Mode.Normal, "0x12A8 ← يعمل بالنظام");
+        Check(BootMode.FromPnpIds(new[] { @"USB\VID_05AC&PID_12A8\x", @"USB\VID_05AC&PID_1227\y" }) == BootMode.Mode.Dfu, "DFU يغلب");
+        Check(BootMode.FromPnpIds(new[] { @"USB\VID_046D&PID_C52B\mouse", @"USB\VID_05AC&PID_8600\hub" }) == BootMode.Mode.None, "لا جهاز Apple مناسب");
+        Check(BootMode.FromPnpIds(null) == BootMode.Mode.None, "null");
+        foreach (BootMode.Mode m in Enum.GetValues(typeof(BootMode.Mode)))
+            Check(BootMode.Guidance(m, false).Steps.Length > 0, "خطوات لكل وضع: " + m);
+        Check(BootMode.Guidance(BootMode.Mode.Recovery, false).Steps.Any(x => x.Contains("دون مسح")), "الاستعادة: التحديث أولًا دون مسح");
     }
 
     static void LiveSyslog()
