@@ -27,6 +27,7 @@ public sealed class Usbmux
         try { c.Connect(host, port); }
         catch (SocketException ex)
         {
+            DeviceTrace.Log($"usbmuxd: لا اتصال بـ {host}:{port} ({ex.SocketErrorCode}) — خدمة Apple Mobile Device غير مشغّلة؟");
             c.Dispose();
             throw new DeviceException("خدمة Apple Mobile Device غير مشغّلة على هذا الكمبيوتر.\n" +
                 "ثبّت iTunes أو تطبيق Apple Devices من متجر مايكروسوفت، ثم صِل الآيفون بالكيبل.", ex);
@@ -50,8 +51,11 @@ public sealed class Usbmux
         s.Flush();
         var rh = Io.ReadExact(s, 16);
         uint len = BitConverter.ToUInt32(rh, 0);
-        if (len < 16 || len > 16 * 1024 * 1024) throw new DeviceException("رد غير صالح من خدمة Apple Mobile Device");
-        return Plist.ParseDict(Io.ReadExact(s, (int)len - 16));
+        if (len < 16 || len > 16 * 1024 * 1024) { DeviceTrace.Log($"usbmuxd: رد بطول غير صالح {len}"); throw new DeviceException("رد غير صالح من خدمة Apple Mobile Device"); }
+        var reply = Plist.ParseDict(Io.ReadExact(s, (int)len - 16));
+        DeviceTrace.Log($"usbmuxd: {msg.Str("MessageType")} ← رد {reply.Str("MessageType")}" + (reply.ContainsKey("Number") ? $" رقم {reply.Long("Number")}" : "") +
+            (reply.TryGetValue("DeviceList", out var dl) && dl is List<object> l ? $" ({l.Count} جهاز)" : ""));
+        return reply;
     }
 
     static void CheckResult(Dictionary<string, object> r, string what)
@@ -79,6 +83,7 @@ public sealed class Usbmux
                 var udid = props.Str("SerialNumber");
                 if (id >= 0 && udid != "") list.Add(new UsbDevice(id, udid, props.Str("ConnectionType")));
             }
+        foreach (var d in list) DeviceTrace.Log($"جهاز: {DeviceTrace.Mask(d.Udid)} ({d.ConnectionType})");
         return list.OrderBy(d => d.ConnectionType == "USB" ? 0 : 1).ToList();
     }
 
@@ -89,13 +94,15 @@ public sealed class Usbmux
         {
             using var c = Open();
             var r = Request(c.GetStream(), new() { ["MessageType"] = "ReadPairRecord", ["PairRecordID"] = udid });
-            if (r.Data("PairRecordData") is { Length: > 0 } data) return Plist.ParseDict(data);
+            if (r.Data("PairRecordData") is { Length: > 0 } data) { DeviceTrace.Log("سجل الاقتران: من usbmuxd"); return Plist.ParseDict(data); }
+            DeviceTrace.Log("سجل الاقتران: usbmuxd لم يعطه");
         }
         catch (DeviceException) { throw; }
-        catch (Exception) { }
+        catch (Exception ex) { DeviceTrace.Error("ReadPairRecord", ex); }
         // احتياط: ملف الاقتران الذي تحفظه خدمة Apple في ويندوز
         var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Apple", "Lockdown", udid + ".plist");
-        if (File.Exists(path)) return Plist.ParseDict(File.ReadAllBytes(path));
+        if (File.Exists(path)) { DeviceTrace.Log("سجل الاقتران: من ملف Lockdown"); return Plist.ParseDict(File.ReadAllBytes(path)); }
+        DeviceTrace.Log("سجل الاقتران: غير موجود — الجهاز لم يثق بهذا الكمبيوتر");
         throw new DeviceException("هذا الكمبيوتر غير موثوق لدى الآيفون.\n" +
             "افتح iTunes أو تطبيق Apple Devices وصِل الآيفون، ثم اضغط «ثق» على شاشة الآيفون وأدخل رمزه، وأعد المحاولة.");
     }
@@ -109,6 +116,7 @@ public sealed class Usbmux
             int swapped = ((devicePort & 0xFF) << 8) | ((devicePort >> 8) & 0xFF);
             var r = Request(c.GetStream(), new() { ["MessageType"] = "Connect", ["DeviceID"] = deviceId, ["PortNumber"] = (long)swapped });
             CheckResult(r, "المنفذ " + devicePort);
+            DeviceTrace.Log($"نفق إلى المنفذ {devicePort}: مفتوح");
             return c;
         }
         catch { c.Dispose(); throw; }

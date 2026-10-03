@@ -57,7 +57,7 @@ public sealed class Afc
         if (r.Op == OpStatus)
         {
             var code = r.Header.Length >= 8 ? BinaryPrimitives.ReadUInt64LittleEndian(r.Header) : 0;
-            if (code != 0) throw new AfcException(code);
+            if (code != 0) { DeviceTrace.Log($"AFC: العملية {op} ← رمز {code}"); throw new AfcException(code); }
         }
         return r;
     }

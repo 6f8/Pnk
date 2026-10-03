@@ -106,6 +106,7 @@ public class AnalyzeForm : BaseForm
         foreach (var b in bar.Controls.OfType<ModernButton>()) { b.Height = 40; b.Margin = new Padding(4, 3, 4, 3); }
         moreMenu.Font = Theme.F(10.5f);
         moreMenu.Items.Add("اختبار العزل (وضع الطاولة)", null, (s, e) => ShowIsolation());
+        moreMenu.Items.Add("حفظ سجل تشخيص الاتصال (للمطور)", null, (s, e) => SaveDeviceTrace());
         moreMenu.Items.Add("السجل المباشر من الآيفون", null, (s, e) => { using var f = new LiveLogForm(); f.ShowDialog(Form.ActiveForm ?? FindForm()); });
         moreMenu.Items.Add("فحص الجهاز بالكيبل (الهوية، البطارية، الشحن)", null, (s, e) => InspectDevice());
         moreMenu.Items.Add(new ToolStripSeparator());
@@ -430,8 +431,7 @@ public class AnalyzeForm : BaseForm
         var progress = new Progress<string>(t => logsCard.Subtitle = t);
         Kashif.Device.DevicePull pull;
         try { pull = await Task.Run(() => Kashif.Device.CrashReports.Pull(progress: progress)); }
-        catch (Kashif.Device.DeviceException ex) { Dialogs.Warn(ex.Message, "السحب من الآيفون"); return; }
-        catch (Exception ex) { Dialogs.Warn("تعذر السحب من الآيفون: " + ex.Message, "السحب من الآيفون"); return; }
+        catch (Exception ex) { DeviceFailure(ex, "السحب من الآيفون"); return; }
         finally
         {
             busy = false;
@@ -458,6 +458,29 @@ public class AnalyzeForm : BaseForm
         Dialogs.Message(string.Join("\n", notes), "السحب من الآيفون", Tone.Info);
     }
 
+    /// <summary>فشل ميزة بالكيبل: الرسالة المفهومة، وحفظ سجل تشخيص الاتصال لإرساله للمطور</summary>
+    static void DeviceFailure(Exception ex, string title)
+    {
+        Kashif.Device.DeviceTrace.Error(title, ex);
+        string path = null;
+        try { path = Kashif.Device.DeviceTrace.Save(Path.Combine(Db.DataDir, "device-logs")); } catch { }
+        var msg = ex is Kashif.Device.DeviceException ? ex.Message : $"تعذر {title}: {ex.Message}";
+        if (path != null) msg += $"\n\nحُفظ سجل تشخيص الاتصال في:\n{path}\nإن تكرر الخطأ أرسل هذا الملف للمطور — لا يحتوي بيانات الزبون.";
+        Dialogs.Warn(msg, title);
+    }
+
+    /// <summary>من «المزيد»: حفظ آخر سجل تشخيص اتصال وفتح مجلده</summary>
+    static void SaveDeviceTrace()
+    {
+        if (Kashif.Device.DeviceTrace.Empty) { Ui.Warn("لا يوجد سجل اتصال بعد — استخدم ميزة بالكيبل أولًا (من الآيفون، فحص الجهاز، السجل المباشر)."); return; }
+        try
+        {
+            var path = Kashif.Device.DeviceTrace.Save(Path.Combine(Db.DataDir, "device-logs"));
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
+        }
+        catch (Exception ex) { Ui.Warn("تعذر حفظ السجل: " + ex.Message); }
+    }
+
     /// <summary>قياسات الجهاز الموصول: تُحفظ في الملاحظات (تبقى مع الفحص) وتُطبَّق على الترتيب</summary>
     void SetDevice(Kashif.Device.DeviceCheck c)
     {
@@ -478,8 +501,7 @@ public class AnalyzeForm : BaseForm
         UpdateButtons();
         Kashif.Device.DeviceCheck c;
         try { c = await Task.Run(() => Kashif.Device.CrashReports.Inspect()); }
-        catch (Kashif.Device.DeviceException ex) { Dialogs.Warn(ex.Message, "فحص الجهاز بالكيبل"); return; }
-        catch (Exception ex) { Dialogs.Warn("تعذر فحص الجهاز: " + ex.Message, "فحص الجهاز بالكيبل"); return; }
+        catch (Exception ex) { DeviceFailure(ex, "فحص الجهاز بالكيبل"); return; }
         finally { busy = false; if (!IsDisposed) UpdateButtons(); }
         if (IsDisposed) return;
         SetDevice(c);

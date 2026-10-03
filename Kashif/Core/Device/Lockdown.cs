@@ -43,6 +43,8 @@ public sealed class Lockdown : IDisposable
         if (extra != null) foreach (var kv in extra) msg[kv.Key] = kv.Value;
         var r = Send(stream, msg);
         var error = r.Str("Error");
+        var label = request == "GetValue" && extra != null ? $"GetValue {extra.GetValueOrDefault("Key")}" : request;
+        DeviceTrace.Log($"lockdown: {label} ← {(error != "" ? "خطأ " + error : "تم")}");
         if (error != "") throw new DeviceException(Explain(error), null);
         return r;
     }
@@ -67,6 +69,7 @@ public sealed class Lockdown : IDisposable
     public void StartSession()
     {
         var r = Request("StartSession", new() { ["HostID"] = pair.Str("HostID"), ["SystemBUID"] = pair.Str("SystemBUID") });
+        DeviceTrace.Log("lockdown: الجلسة " + (r.Bool("EnableSessionSSL") ? "تطلب TLS" : "بلا TLS"));
         if (r.Bool("EnableSessionSSL")) stream = Tls(stream, pair);
     }
 
@@ -75,6 +78,7 @@ public sealed class Lockdown : IDisposable
     {
         var r = Request("StartService", new() { ["Service"] = name });
         long port = r.Long("Port");
+        DeviceTrace.Log($"lockdown: الخدمة {name} ← المنفذ {port}" + (r.Bool("EnableServiceSSL") ? " (TLS)" : ""));
         if (port <= 0 || port > 65535) throw new DeviceException("الآيفون لم يشغّل الخدمة " + name);
         return ((int)port, r.Bool("EnableServiceSSL"));
     }
@@ -89,14 +93,19 @@ public sealed class Lockdown : IDisposable
         // ويندوز لا يستخدم مفتاحًا مؤقتًا في TLS: يُعاد تحميل الشهادة مع مفتاحها
         var cert = new X509Certificate2(pem.Export(X509ContentType.Pkcs12));
         var ssl = new SslStream(inner, false);
-        ssl.AuthenticateAsClient(new SslClientAuthenticationOptions
+        try
         {
-            TargetHost = "iPhone",
-            ClientCertificates = new X509CertificateCollection { cert },
-            EnabledSslProtocols = SslProtocols.None,
-            CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
-            RemoteCertificateValidationCallback = (s, c, ch, e) => true,
-        });
+            ssl.AuthenticateAsClient(new SslClientAuthenticationOptions
+            {
+                TargetHost = "iPhone",
+                ClientCertificates = new X509CertificateCollection { cert },
+                EnabledSslProtocols = SslProtocols.None,
+                CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
+                RemoteCertificateValidationCallback = (s, c, ch, e) => true,
+            });
+        }
+        catch (Exception ex) { DeviceTrace.Error("مصافحة TLS", ex); throw; }
+        DeviceTrace.Log($"TLS: تم ({ssl.SslProtocol}, {ssl.NegotiatedCipherSuite})");
         return ssl;
     }
 

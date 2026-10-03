@@ -87,6 +87,15 @@ static partial class Program
             "البطارية من خدمة التشخيص: " + pull.Battery);
         Check(pull.Check?.Identity is { Serial: "F2LXK0Q1ABCD", Imei: "356000000000001", ProductType: "iPhone14,3" }, "هوية الجهاز: " + pull.Check?.Identity);
         Check(pull.Check?.Charge is { External: true, AmperageMa: 850, VoltageMv: 4120, Watts: 5, Percent: 64, PathWorks: true }, "الشحن: " + pull.Check?.Charge);
+        var trace = DeviceTrace.Text;
+        Check(trace.Contains("سحب السجلات") && trace.Contains("lockdown: StartSession ← تم") && trace.Contains("نفق إلى المنفذ 62078") && trace.Contains("السحب: 4 ملف بانك"),
+            "سجل الاتصال يحمل الخطوات");
+        Check(!trace.Contains("00008110-000A1B2C3D4E5F6A") && trace.Contains("00008110…") && !trace.Contains("F2LXK0Q1ABCD") && !trace.Contains("356000000000001") && !trace.Contains("HOST-1"),
+            "سجل الاتصال بلا UDID كامل ولا رقم تسلسلي ولا IMEI ولا معرّف الاقتران");
+        var dir = Path.Combine(Path.GetTempPath(), "kashif-trace-" + Guid.NewGuid().ToString("N"));
+        var saved = DeviceTrace.Save(dir);
+        Check(File.Exists(saved) && File.ReadAllText(saved).Contains("سجل تشخيص الاتصال"), "حفظ السجل");
+        Directory.Delete(dir, true);
         var only = CrashReports.Inspect(new Usbmux("127.0.0.1", fake.Port));
         Check(only.Battery?.Percent == 90 && only.Identity.ProductType == "iPhone14,3" && only.Charge?.PathWorks == true, "فحص الجهاز بلا سحب");
     }
@@ -111,6 +120,7 @@ static partial class Program
             try { CrashReports.Pull(new Usbmux("127.0.0.1", fake.Port)); Check(false, "كان يجب أن يفشل"); }
             catch (DeviceException ex) { Check(ex.Message.Contains("افتح قفل"), "رسالة: " + ex.Message); }
         }
+        Check(DeviceTrace.Text.Contains("lockdown: StartSession ← خطأ PasswordProtected"), "سجل الاتصال يحمل رمز الخطأ من الجهاز");
     }
 
     static void BatteryAndIsolation()

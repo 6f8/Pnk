@@ -44,6 +44,7 @@ public static class CrashReports
     public static DevicePull Pull(Usbmux mux = null, string udid = null, IProgress<string> progress = null)
     {
         mux ??= new Usbmux();
+        DeviceTrace.Begin("سحب السجلات من الآيفون");
         progress?.Report("البحث عن الآيفون…");
         var devices = mux.ListDevices();
         if (devices.Count == 0) throw new DeviceException("لا يوجد آيفون موصول. صِل الجهاز بالكيبل وافتح قفل شاشته، ثم أعد المحاولة.");
@@ -94,6 +95,7 @@ public static class CrashReports
             try { logs.Add(new DeviceLog(Path.GetFileName(chosen[i]), System.Text.Encoding.UTF8.GetString(afc.ReadFile(chosen[i])))); }
             catch (AfcException) { failed++; }
         }
+        DeviceTrace.Log($"السحب: {found.Count} ملف بانك، قُرئ {logs.Count}، فشل {failed}");
         return new DevicePull(name, product, version, dev.Udid, logs, failed, pool.Count - chosen.Count, check);
     }
 
@@ -103,7 +105,8 @@ public static class CrashReports
         var id = new DeviceIdentity(ld.GetValue("DeviceName"), ld.GetValue("ProductType"), ld.GetValue("ProductVersion"),
             ld.GetValue("SerialNumber"), ld.GetValue("InternationalMobileEquipmentIdentity"), dev.Udid);
         Dictionary<string, object> reg = null;
-        try { reg = BatteryReader.Query(ld, mux, dev.DeviceId, pair); } catch (Exception) { }
+        try { reg = BatteryReader.Query(ld, mux, dev.DeviceId, pair); } catch (Exception ex) { DeviceTrace.Error("قراءة البطارية", ex); }
+        DeviceTrace.Log($"الفحص: الهوية {(id.ProductType != "" ? id.ProductType : "؟")} · رقم تسلسلي {(id.Serial != "" ? "موجود" : "غير متاح")} · IMEI {(id.Imei != "" ? "موجود" : "غير متاح")} · البطارية {(reg != null ? "مقروءة" : "غير مقروءة")}");
         return new DeviceCheck(id, BatteryReader.Parse(reg) is { Valid: true } b ? b : null, BatteryReader.ParseCharge(reg));
     }
 
@@ -111,6 +114,7 @@ public static class CrashReports
     public static DeviceCheck Inspect(Usbmux mux = null)
     {
         mux ??= new Usbmux();
+        DeviceTrace.Begin("فحص الجهاز بالكيبل");
         var dev = mux.ListDevices().FirstOrDefault() ?? throw new DeviceException("لا يوجد آيفون موصول. صِل الجهاز بالكيبل وافتح قفل شاشته، ثم أعد المحاولة.");
         var pair = mux.ReadPairRecord(dev.Udid);
         using var ld = new Lockdown(mux.Connect(dev.DeviceId, Lockdown.Port), pair);

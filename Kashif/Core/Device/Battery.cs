@@ -57,6 +57,7 @@ public static class BatteryReader
             foreach (var query in new[] { ("EntryName", "AppleSmartBattery"), ("EntryClass", "IOPMPowerSource") })
             {
                 var r = Lockdown.Send(s, new() { ["Request"] = "IORegistry", [query.Item1] = query.Item2 });
+                DeviceTrace.Log($"التشخيص: IORegistry {query.Item2} ← {r.Str("Status")}");
                 if (r.Str("Status") != "Success") continue;
                 var diag = r.TryGetValue("Diagnostics", out var dv) ? dv as Dictionary<string, object> : null;
                 var reg = diag != null && diag.TryGetValue("IORegistry", out var iv) ? iv as Dictionary<string, object> : null;

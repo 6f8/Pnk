@@ -63,12 +63,13 @@ public sealed class LiveSession : IDisposable
     public void Start(Usbmux mux = null)
     {
         mux ??= new Usbmux();
+        DeviceTrace.Begin("السجل المباشر");
         Running = true;
         Task.Run(() =>
         {
             string error = null;
             try { Run(mux); }
-            catch (DeviceException ex) { error = ex.Message; }
+            catch (DeviceException ex) { error = ex.Message; DeviceTrace.Error("السجل المباشر", ex); }
             catch (Exception ex) when (!cts.IsCancellationRequested) { error = ex.Message; }
             catch (Exception) { }
             Running = false;
@@ -92,7 +93,9 @@ public sealed class LiveSession : IDisposable
         using var reg = cts.Token.Register(() => { try { c.Dispose(); } catch { } });
         Stream s = c.GetStream();
         if (ssl) s = Lockdown.Tls(s, pair);
+        DeviceTrace.Log("السجل المباشر: بدأ القراءة");
         Read(s, cts.Token);
+        DeviceTrace.Log($"السجل المباشر: انتهى ({flags.Count} سطر مميّز)");
     }
 
     /// <summary>تقسيم التدفق إلى رسائل (الصفر أو السطر الجديد يفصلان) — منفصل للاختبار</summary>
