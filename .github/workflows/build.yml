@@ -121,6 +121,14 @@ jobs:
           }
           if (ClickByName "الرئيسية") { Start-Sleep 4; Shot "3-home" }
           Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          # خريطة الجهاز لجيل الزر الرئيسي (SE 2020): نفس سجل mic1 بموديل iPhone12,8
+          Start-Sleep 3
+          $se = Join-Path $env:RUNNER_TEMP "se-sample.ips"
+          (Get-Content Kashif.Tests\Samples\mic1_iphonex_valid.ips -Raw).Replace('iPhone10,3', 'iPhone12,8') | Set-Content $se -Encoding utf8
+          $p2 = Start-Process publish\Kashif.exe -ArgumentList "`"$se`"" -PassThru
+          Start-Sleep 20
+          Shot "6-map-iphone-se"
+          Stop-Process -Id $p2.Id -Force -ErrorAction SilentlyContinue
           Copy-Item Kashif.WinCheck\bin\Release\*\report-sample.png shots\5-customer-report.png -ErrorAction SilentlyContinue
           Get-ChildItem shots
 

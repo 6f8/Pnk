@@ -95,7 +95,8 @@ public class DeviceMap : Control
         new(name, new RectangleF(x, y, w, h), shape, label, font, parts);
 
     // مرتبة من الأكبر إلى الأصغر: الصغير يُرسم فوق الكبير ويُلتقط أولًا بالنقر
-    static readonly Zone[] Zones =
+    /// <summary>X وما بعده: حبة الكاميرا الأمامية والحساسات أعلى الشاشة، و Face ID بجانبها، بلا زر رئيسي</summary>
+    static readonly Zone[] Modern =
     {
         Z("البطارية", 70, 170, 168, 330, Shape.Rect, null, 16, Parts.Battery),
         Z("البوردة", 250, 120, 60, 420, Shape.Rect, new PointF(280, 560), 14,
@@ -109,6 +110,25 @@ public class DeviceMap : Control
         Z("Face ID", 58, 40, 52, 30, Shape.Rect, new PointF(84, 92), 12, Parts.Biometric),
         Z("حساس القرب والإضاءة", 120, 33, 154, 44, Shape.Notch, new PointF(180, 110), 16, Parts.FrontFlex),
     };
+
+    /// <summary>8 وما قبله و SE: إطار أعلى وأسفل الشاشة، الحساسات والكاميرا الأمامية في شريط أعلى، والبصمة في الزر الرئيسي</summary>
+    static readonly Zone[] Classic =
+    {
+        Z("البطارية", 70, 170, 168, 330, Shape.Rect, null, 16, Parts.Battery),
+        Z("البوردة", 250, 120, 60, 420, Shape.Rect, new PointF(280, 560), 14,
+            Parts.Board, Parts.SmcLine, Parts.Pmu, Parts.SocRam, Parts.Nand, Parts.Wifi, Parts.Baseband, Parts.AudioIc, Parts.ChargeIc, Parts.Sensors),
+        Z("فلاتة الشحن", 90, 646, 180, 26, Shape.Rect, null, 13, Parts.ChargingFlex),
+        Z("الكاميرا", 56, 118, 84, 40, Shape.Rect, null, 13, Parts.Camera),
+        Z("موصل البطارية", 144, 136, 94, 26, Shape.Rect, null, 12, Parts.BatteryConn),
+        Z("السماعة", 46, 646, 36, 26, Shape.Rect, null, 12, Parts.AudioParts),
+        Z("زر التشغيل", 334, 170, 12, 90, Shape.Rect, null, 12, Parts.PowerFlex),
+        Z("البصمة", 154, 584, 52, 52, Shape.Circle, new PointF(110, 610), 12, Parts.TouchId, Parts.Biometric),
+        Z("حساس القرب والإضاءة", 130, 46, 100, 18, Shape.Rect, new PointF(180, 80), 15, Parts.FrontFlex),
+    };
+
+    AppleDevices.Family family = AppleDevices.Family.Later;
+    bool IsClassic => family == AppleDevices.Family.Early;
+    Zone[] Zones => IsClassic ? Classic : Modern;
 
     readonly ToolTip tip = new() { InitialDelay = 250, ReshowDelay = 100, AutoPopDelay = 15000 };
     List<Candidate> candidates = new();
@@ -128,6 +148,9 @@ public class DeviceMap : Control
     public void Set(Diagnosis d)
     {
         candidates = d?.Candidates.ToList() ?? new();
+        // شكل الجهاز حسب الجيل (8 وما قبله و SE بزر رئيسي، X وما بعده بلا زر)
+        family = d == null ? AppleDevices.Family.Later : AppleDevices.FamilyOf(d.Product, d.Log?.PanicString);
+        if (family is AppleDevices.Family.Unknown or AppleDevices.Family.IPad) family = AppleDevices.Family.Later;
         hover = null;
         if (selected != null && RankOf(selected) == 0) selected = null;
         tip.SetToolTip(this, null);
@@ -174,21 +197,24 @@ public class DeviceMap : Control
         // الهيكل والشاشة
         Gfx.FillRound(g, Rc(20, 10, 320, 680), 52 * k, Color.White);
         Gfx.DrawRound(g, Rc(20, 10, 320, 680), 52 * k, Palette6.Ink, Line(3));
-        var inner = Rc(38, 28, 284, 644);
-        Gfx.FillRound(g, inner, 38 * k, Palette6.Screen);
+        // الجيل القديم: شاشة بإطار أعلى وأسفل، وزر رئيسي يُرسم دائمًا ليُعرف الجهاز
+        var inner = IsClassic ? Rc(38, 96, 284, 470) : Rc(38, 28, 284, 644);
+        Gfx.FillRound(g, inner, (IsClassic ? 8 : 38) * k, Palette6.Screen);
+        if (IsClassic)
+            using (var p = new Pen(Palette6.ScreenLine, Line(2))) g.DrawEllipse(p, Rc(154, 584, 52, 52));
         int screenRank = RankOf(Parts.Screen);
         if (screenRank > 0)
         {
             var (_, stroke, text, dashed) = Style(screenRank, candidates[screenRank - 1]);
             using (var p = new Pen(stroke, Line(3)))
-            using (var path = Gfx.Round(inner, 38 * k))
+            using (var path = Gfx.Round(inner, (IsClassic ? 8 : 38) * k))
             {
                 if (dashed) p.DashPattern = new[] { 4f, 3f };
                 g.DrawPath(p, path);
             }
-            DrawLabel(g, "الشاشة", Px(14, true), new PointF(ox + 180 * k, oy + 580 * k), text);
+            DrawLabel(g, "الشاشة", Px(14, true), new PointF(ox + 180 * k, oy + (IsClassic ? 548 : 580) * k), text);
         }
-        else Gfx.DrawRound(g, inner, 38 * k, Palette6.ScreenLine, Line(1.5f));
+        else Gfx.DrawRound(g, inner, (IsClassic ? 8 : 38) * k, Palette6.ScreenLine, Line(1.5f));
 
         foreach (var z in Zones)
         {
