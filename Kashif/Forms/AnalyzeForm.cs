@@ -741,6 +741,8 @@ public class AnalyzeForm : BaseForm
             interview.Visible = false;
             deviceLine.Text = "لم يُفتح سجل بعد";
             hint.Text = "افتح ملف panic-full من «فتح ملفات» أو الصق نصه من «لصق» — أو اسحب الملف أو لقطة شاشة للسجل إلى هنا.";
+            hint.ForeColor = Palette6.Muted;
+            hint.Height = 58;
             causes.SetItems(Array.Empty<StackItem>());
             map.Set(null);
             steps.SetItems(Array.Empty<StackItem>());
@@ -765,8 +767,9 @@ public class AnalyzeForm : BaseForm
         {
             if (Session.Can("history"))
             {
-                var (bySig, byArr) = PanicStore.ShopHistory(shown, recordId);
-                if (byArr.Count > 0) PanicAnalyzer.ApplyShopHistory(shown, byArr, true);
+                var (bySig, byArr, byDetail) = PanicStore.ShopHistory(shown, recordId);
+                if (byArr.Count > 0) PanicAnalyzer.ApplyShopHistory(shown, byArr, HistoryScope.SensorArray);
+                if (byDetail.Count > 0) PanicAnalyzer.ApplyShopHistory(shown, byDetail, HistoryScope.Detail);
                 if (bySig.Count > 0) PanicAnalyzer.ApplyShopHistory(shown, bySig, false);
             }
         }
@@ -812,7 +815,10 @@ public class AnalyzeForm : BaseForm
         interview.Visible = shown.Candidates.Count > 0;
 
         deviceLine.Text = string.Join(" · ", new[] { shown.Device, shown.Title }.Where(x => !string.IsNullOrWhiteSpace(x)));
-        hint.Text = "اللون الأغمق = الأرجح. اضغط على أي قطعة لترى الدليل وخطوة فحصها.";
+        shown.Decider = PanicAnalyzer.WhatDecides(shown, answers);
+        hint.Text = shown.Decider != "" ? "⚖ " + shown.Decider : "اللون الأغمق = الأرجح. اضغط على أي قطعة لترى الدليل وخطوة فحصها.";
+        hint.ForeColor = shown.Decider != "" ? Palette6.Ink : Palette6.Muted;
+        hint.Height = shown.Decider != "" ? 90 : 58;
 
         causes.SetItems(shown.Candidates.Select((c, k) =>
         {

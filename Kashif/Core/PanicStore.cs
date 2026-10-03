@@ -77,14 +77,15 @@ public static class PanicStore
         string.IsNullOrEmpty(deviceKey) ? new DataTable() : Db.Query(StoreSql.Previous, deviceKey, exceptId);
 
     /// <summary>عدد الأجهزة الأخرى التي ظهر عليها نفس النمط بنفس رقم بناء iOS</summary>
-    /// <summary>خبرة المحل للتحليل المعروض: بنفس البصمة، وبنفس مصفوفة حساسات SMC على نفس الموديل</summary>
-    public static (List<(string Part, int Count)> BySignature, List<(string Part, int Count)> BySensorArray) ShopHistory(Diagnosis d, long exceptId)
+    /// <summary>خبرة المحل للتحليل المعروض: بنفس البصمة، وبنفس مصفوفة حساسات SMC وبنفس البصمة الدقيقة على نفس الموديل</summary>
+    public static (List<(string Part, int Count)> BySignature, List<(string Part, int Count)> BySensorArray, List<(string Part, int Count)> ByDetail) ShopHistory(Diagnosis d, long exceptId)
     {
         List<(string, int)> Rows(System.Data.DataTable t) => t.Rows.Cast<System.Data.DataRow>().Select(r => (Db.S(r["part"]), (int)Db.L(r["n"]))).ToList();
         var bySig = d == null || d.Signature == "" ? new() : Rows(Db.Query(StoreSql.HistoryBySignature, d.Signature, exceptId));
         var key = PanicAnalyzer.SensorArrayKey(d);
         var byArr = key == "" || d.Product == "" ? new() : Rows(Db.Query(StoreSql.HistoryBySensorArray, d.Product, key, exceptId));
-        return (bySig, byArr);
+        var byDetail = d == null || d.DetailKey == "" || d.Product == "" ? new() : Rows(Db.Query(StoreSql.HistoryByDetail, d.Product, d.DetailKey, exceptId));
+        return (bySig, byArr, byDetail);
     }
 
     public static long SameBuildDevices(Diagnosis d) =>

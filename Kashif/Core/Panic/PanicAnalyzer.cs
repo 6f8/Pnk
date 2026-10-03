@@ -61,6 +61,10 @@ public sealed class Diagnosis
     public string LastKext = "";
     /// <summary>المدة من الإقلاع حتى الانهيار (من Epoch Time) بالثواني — null إن لم تُقرأ</summary>
     public double? UptimeSeconds;
+    /// <summary>بصمة دقيقة لنفس الموديل (الحساسات المفقودة معًا، موضع فشل SMC، رقم خط I2C، سطر AOP، أو سطر الانهيار بلا عناوين) — يتعلّم المحل معناها من حالاته المؤكدة</summary>
+    public string DetailKey = "", DetailText = "";
+    /// <summary>ما الذي يفصل بين أعلى سببين متقاربين (يُحسب بعد كل تغيير في الترتيب)</summary>
+    public string Decider = "";
     /// <summary>أجوبة الفحص التفاعلي المطبّقة على هذا التحليل</summary>
     public int AnswersApplied;
 
@@ -73,6 +77,9 @@ public sealed class Diagnosis
 /// ثم يرتب الأسباب المحتملة حسب قاعدة المعرفة وخبرة المحل ومعلومات الحالة.
 /// لا يعتمد على الواجهة ولا قاعدة البيانات — يُختبر وحده.
 /// </summary>
+/// <summary>نطاق خبرة المحل</summary>
+public enum HistoryScope { Signature, SensorArray, Detail }
+
 public static class PanicAnalyzer
 {
     static readonly Regex Headline = new(@"panic\s*\(\s*cpu\s*\d+\s*caller\s*0x[0-9a-f]+\s*\)\s*:\s*([^\n]*)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -108,6 +115,8 @@ public static class PanicAnalyzer
     static readonly Regex LastKextRx = new(@"last started kext at \d+:\s*(com\.apple\.[A-Za-z0-9_.\-]+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     static readonly Regex EpochBoot = new(@"Boot\s*:\s*0x([0-9a-fA-F]+)", RegexOptions.Compiled);
     static readonly Regex EpochCalendar = new(@"Calendar\s*:\s*0x([0-9a-fA-F]+)", RegexOptions.Compiled);
+    static readonly Regex I2cBus = new(@"\bi2c(\d+)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    static readonly Regex AopLine = new(@"AOP PANIC\s*-?\s*([^\n]*)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     static readonly Regex AliveBits = new(@"current\s+([0-9a-fA-F]+)\s*,\s*mask\s+([0-9a-fA-F]+)\s*,\s*expected\s+([0-9a-fA-F]+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     static readonly (string Label, Regex Rx)[] InfoLines =
     {
@@ -197,10 +206,45 @@ public static class PanicAnalyzer
         if (AppleDevices.IsIPad(d.Product) && d.MissingSensors.Count > 0)
             d.Warnings.Add("جهاز iPad: أماكن الحساسات تختلف عن الآيفون، فالترتيب مبني على الأماكن العامة — تأكد من مخطط الجهاز.");
 
+        (d.DetailKey, d.DetailText) = Detail(d, ps);
+        if (AopLine.Match(ps) is { Success: true } aop && aop.Groups[1].Value.Trim() is var aopText && aopText != "" && !d.Headline.Contains(aopText, StringComparison.Ordinal))
+            d.Evidence.Add(new("رسالة AOP", Cut(aopText, 120), "نص الرسالة من داخل المعالج دائم التشغيل كما هو — لا تفسير موثّق لكل رسائله، ويتعلّم المحل معناها من حالاته المؤكدة", "AOP PANIC"));
+
         ApplyFlags(d, flags);
         ApplyCustom(d, custom);
         Rank(d);
         return d;
+    }
+
+    /// <summary>
+    /// البصمة الدقيقة للسجل (تُقارن على نفس الموديل فقط، لأن معنى الرموز والأرقام يختلف بين الأجهزة):
+    /// الحساسات المفقودة معًا ← موضع فشل SMC والمهمة ← رقم خط I2C ← سطر AOP ← سطر الانهيار. العناوين والأرقام الطويلة تُحذف.
+    /// </summary>
+    static (string Key, string Text) Detail(Diagnosis d, string ps)
+    {
+        if (ps.Trim() == "") return ("", "");
+        if (d.MissingSensors.Count > 0)
+        {
+            var set = d.MissingSensors.Select(x => x.ToLowerInvariant()).Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList();
+            return ("sensors:" + string.Join(",", set), "نفس الحساسات المفقودة (" + string.Join("، ", d.MissingSensors) + ")");
+        }
+        if (d.SmcAssert != "" || d.FaultingTask != "")
+            return ($"smc:{d.SmcAssert.ToLowerInvariant()}|{d.FaultingTask}",
+                "نفس موضع فشل SMC" + (d.SmcAssert != "" ? $" ({d.SmcAssert})" : "") + (d.FaultingTask != "" ? $" والمهمة {d.FaultingTask}" : ""));
+        if (d.Kind == "خط I2C" && I2cBus.Match(ps) is { Success: true } bus)
+            return ("i2c:" + bus.Groups[1].Value, $"نفس خط I2C (i2c{bus.Groups[1].Value})");
+        if (AopLine.Match(ps) is { Success: true } aop && Normalize(aop.Groups[1].Value) is var a && a != "")
+            return ("aop:" + a, "نفس رسالة AOP");
+        var h = Normalize(d.Headline);
+        return h == "" ? ("", "") : ("line:" + h, "نفس سطر الانهيار");
+    }
+
+    /// <summary>نص للمقارنة: بلا عناوين ست عشرية ولا أرقام طويلة ولا فراغات زائدة، بأحرف صغيرة (حتى 100 حرف)</summary>
+    static string Normalize(string s)
+    {
+        s = Regex.Replace(s ?? "", @"0x[0-9a-fA-F]+|\b\d{4,}\b", "#");
+        s = Regex.Replace(s, @"\s+", " ").Trim().ToLowerInvariant();
+        return Cut(s, 100);
     }
 
     static string Cut(string s, int n) => string.IsNullOrEmpty(s) ? "" : s.Length > n ? s[..n] : s;
@@ -408,19 +452,34 @@ public static class PanicAnalyzer
     /// القطع المكتوبة نصًا حرًا (ليست من قائمة القطع) تُذكر دليلًا فقط.
     /// </summary>
     /// <param name="sensorArray">true: نفس مصفوفة حساسات SMC على نفس الموديل (أدق من البصمة)</param>
-    public static void ApplyShopHistory(Diagnosis d, IReadOnlyList<(string Part, int Count)> rows, bool sensorArray)
+    public static void ApplyShopHistory(Diagnosis d, IReadOnlyList<(string Part, int Count)> rows, bool sensorArray) =>
+        ApplyShopHistory(d, rows, sensorArray ? HistoryScope.SensorArray : HistoryScope.Signature);
+
+    /// <summary>
+    /// نطاق المقارنة: مصفوفة حساسات SMC على نفس الموديل (الأدق)، ثم البصمة الدقيقة على نفس الموديل، ثم البصمة العامة على كل الأجهزة.
+    /// </summary>
+    public static void ApplyShopHistory(Diagnosis d, IReadOnlyList<(string Part, int Count)> rows, HistoryScope scopeKind)
     {
         if (d == null || rows == null || rows.Count == 0) return;
         int total = rows.Sum(r => r.Count);
-        var scope = sensorArray ? $"نفس رقم مصفوفة الحساسات ({SensorArrayKey(d)}) على نفس الموديل" : "نفس البصمة";
-        d.Evidence.Add(new(sensorArray ? "خبرة المحل: مصفوفة الحساسات" : "خبرة المحل: نفس البصمة",
-            $"{total} حالة مؤكدة — " + string.Join("، ", rows.Select(r => $"{r.Part} ({r.Count})")),
+        var (title, scope) = scopeKind switch
+        {
+            HistoryScope.SensorArray => ("خبرة المحل: مصفوفة الحساسات", $"نفس رقم مصفوفة الحساسات ({SensorArrayKey(d)}) على نفس الموديل"),
+            HistoryScope.Detail => ("خبرة المحل: نفس التفاصيل على نفس الموديل", $"{d.DetailText} على نفس الموديل"),
+            _ => ("خبرة المحل: نفس البصمة", "نفس البصمة"),
+        };
+        d.Evidence.Add(new(title, $"{total} حالة مؤكدة — " + string.Join("، ", rows.Select(r => $"{r.Part} ({r.Count})")),
             $"فحوصات سابقة في محلك بـ{scope} أُصلحت بهذه القطع.", null, "exam"));
         var (part, n) = rows[0];
         if (!Parts.All.Contains(part)) return;
         string why = $"في محلك: {n} من {total} حالات بـ{scope} أُصلحت بها";
         if (n >= 2 && n * 3 >= total * 2)
-            Add(d, part, sensorArray ? Math.Min(95, 65 + 10 * n) : Math.Min(90, 55 + 8 * n), why);
+            Add(d, part, scopeKind switch
+            {
+                HistoryScope.SensorArray => Math.Min(95, 65 + 10 * n),
+                HistoryScope.Detail => Math.Min(92, 60 + 9 * n),
+                _ => Math.Min(90, 55 + 8 * n),
+            }, why);
         else if (n == 1 && d.Candidates.Any(c => c.Part == part)) Bump(d, part, 5, why);
         Rank(d);
     }
@@ -535,6 +594,44 @@ public static class PanicAnalyzer
             .OrderByDescending(x => x.w).ThenBy(x => x.q.Id, StringComparer.Ordinal).ToList();
         remaining = ranked.Count;
         return ranked.Count == 0 ? null : ranked[0].q;
+    }
+
+    /// <summary>القطع التي يمكن فصلها وتشغيل الجهاز بدونها (اختبار العزل)</summary>
+    static readonly HashSet<string> Detachable = new()
+    {
+        Parts.ChargingFlex, Parts.PowerFlex, Parts.FrontFlex, Parts.Screen, Parts.Biometric, Parts.TouchId, Parts.Camera, Parts.AudioParts,
+    };
+
+    /// <summary>
+    /// ما الذي يفصل بين أعلى سببين حين يتقاربان (أقل من 15 درجة): سؤال فحص لم يُجب يحرّكهما في اتجاهين مختلفين،
+    /// أو سجل آخر لنفس الحساس، أو فصل القطعة القابلة للفصل. فارغ إذا كان الأول متقدمًا بوضوح.
+    /// </summary>
+    public static string WhatDecides(Diagnosis d, IReadOnlyList<(string Id, int Answer)> answers = null)
+    {
+        if (d == null || d.Candidates.Count < 2 || d.Summary.StartsWith("مؤكد بالفحص", StringComparison.Ordinal)) return "";
+        var (a, b) = (d.Candidates[0], d.Candidates[1]);
+        if (a.Score - b.Score >= 15) return "";
+        string head = $"«{a.Part}» و«{b.Part}» متقاربان. ";
+        var done = (answers ?? Array.Empty<(string, int)>()).Select(x => x.Id).ToHashSet();
+        int Effect(PanicKnowledge.AnswerOption o, string part) => o.Effects.TryGetValue(part, out var v) ? v : 0;
+        var q = PanicKnowledge.Current.Questions
+            .Where(x => !done.Contains(x.Id) && x.Answers.Any(o => Math.Abs(Effect(o, a.Part) - Effect(o, b.Part)) >= 20))
+            .OrderByDescending(x => x.Free).ThenByDescending(x => x.Priority).ThenBy(x => x.Id, StringComparer.Ordinal).FirstOrDefault();
+        if (q != null)
+        {
+            var splits = q.Answers.Where(o => Math.Abs(Effect(o, a.Part) - Effect(o, b.Part)) >= 20).Take(2)
+                .Select(o => $"«{o.Label}» ← {(Effect(o, a.Part) > Effect(o, b.Part) ? a.Part : b.Part)}");
+            return head + $"يحسم بينهما سؤال الفحص: {q.Text} — " + string.Join("؛ ", splits) + ".";
+        }
+        if (d.LogCount == 1 && d.MissingSensors.Count > 0 && (a.Part == Parts.Board || b.Part == Parts.Board))
+        {
+            var other = a.Part == Parts.Board ? b.Part : a.Part;
+            return head + $"يحسم بينهما سجل آخر من نفس الجهاز: نفس الحساس ({string.Join("، ", d.MissingSensors)}) ← «{other}»؛ حساس مختلف ← خط مشترك على البوردة.";
+        }
+        var off = Detachable.Contains(a.Part) ? (a, b) : Detachable.Contains(b.Part) ? (b, a) : default;
+        if (off.Item1 != null)
+            return head + $"يحسم بينهما اختبار العزل: افصل «{off.Item1.Part}» وشغّل الجهاز — توقف الانهيار ← هي السبب؛ استمر ← «{off.Item2.Part}».";
+        return head + "لا يفصل بينهما شيء في السجل نفسه — سجل آخر من نفس الجهاز بعد ظهور البانك مرة ثانية يحسم الترتيب.";
     }
 
     public static string EncodeAnswers(IEnumerable<(string Id, int Answer)> answers) =>
@@ -1201,6 +1298,42 @@ public static class PanicAnalyzer
                 "افحص البوردة بحثًا عن تأكسد أو آثار ضربة.",
             });
             if (conf > 0) conf--;
+            // قطعة واحدة بين أعلى سببين في كل سجل رغم اختلاف الأنواع: لا تُوزَّع الدرجة على أسباب عامة فقط
+            var shared = items.Select(x => x.Candidates.Take(2).Select(c => c.Part).ToHashSet())
+                .Aggregate((a, b) => { a.IntersectWith(b); return a; })
+                .Where(p => p != Parts.Battery && p != Parts.Board && p != Parts.Ios).ToList();
+            foreach (var p in shared)
+            {
+                Add(d, p, 60, $"بين أعلى سببين في كل السجلات ({items.Count}) رغم اختلاف أنواعها");
+                d.Evidence.Add(new("قطعة مشتركة", p, "كل نوع من أنواع البانك هنا يشير إليها بين أعلى سببين — افحصها قبل الأسباب العامة."));
+            }
+        }
+
+        // ---------- البصمة الدقيقة: تُحفظ للمجموعة فقط إن تطابقت (أو تطابقت في السجلات الأحدث بعد تغيّر النمط) ----------
+        var detailFrom = changedOnce ? items.Skip(change).ToList() : items;
+        if (detailFrom.Select(x => x.DetailKey).Distinct().Count() == 1) { d.DetailKey = last.DetailKey; d.DetailText = last.DetailText; }
+
+        // ---------- رقم بناء iOS بين السجلات ----------
+        var builds = items.Select(x => x.Build ?? "").ToList();
+        if (builds.All(b => b != "") && builds.Distinct().Count() >= 2)
+        {
+            bool buildAtChange = changedOnce && builds.Take(change).Distinct().Count() == 1 && builds.Skip(change).Distinct().Count() == 1 && builds[0] != builds[change];
+            bool samePattern = !changedOnce && sigs.Distinct().Count() == 1 && sigs[0] != "";
+            var list = string.Join(" ← ", builds.Distinct());
+            if (buildAtChange)
+            {
+                d.Evidence.Add(new("تغيّر النمط مع تحديث iOS", $"{builds[0]} ← {builds[change]}",
+                    "كل السجلات قبل التغيّر على إصدار، وكل السجلات بعده على إصدار آخر: قد يكون السبب برمجيًا في الإصدار الجديد — إلا إذا بُدّلت قطعة في نفس الفترة. جرّب الاستعادة عبر الكمبيوتر قبل فتح الجهاز."));
+                Add(d, Parts.Ios, 50, $"تغيّر النمط بالضبط مع تغيّر إصدار iOS ({builds[0]} ← {builds[change]})");
+                Bump(d, Parts.Ios, 10, "تغيّر النمط مع تحديث النظام");
+            }
+            else if (samePattern)
+            {
+                d.Evidence.Add(new("نفس النمط على أكثر من إصدار iOS", list,
+                    "نفس البانك استمر بعد تغيّر إصدار النظام — لا يرتبط بإصدار معيّن، فالعتاد هو الأرجح."));
+                Bump(d, Parts.Ios, -10, $"نفس النمط على إصدارات iOS مختلفة ({list})");
+            }
+            else d.Evidence.Add(new("إصدارات iOS في السجلات", list, "السجلات من أكثر من إصدار نظام.", null, "info"));
         }
         d.Confidence = rank.First(kv => kv.Value == conf).Key;
         foreach (var w in items.SelectMany(x => x.Warnings).Distinct()) if (!d.Warnings.Contains(w)) d.Warnings.Add(w);
@@ -1238,6 +1371,7 @@ public static class PanicAnalyzer
             sb.AppendLine("خطوات الفحص:");
             for (int i = 0; i < d.Steps.Count; i++) sb.AppendLine($"  {i + 1}. {d.Steps[i]}");
         }
+        if (d.Decider != "") sb.AppendLine("ما يحسم الترتيب: " + d.Decider);
         if (d.Timeline.Count > 1)
         {
             sb.AppendLine();

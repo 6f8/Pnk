@@ -17,6 +17,9 @@ static partial class Program
         Run("تصدير الحالات المؤكدة", ExportCases);
         Run("تاريخ الإصلاح وثبات مدة الانهيار", RepairAndUptime);
         Run("خبرة المحل: نفس البصمة ونفس مصفوفة الحساسات", ShopHistory);
+        Run("البصمة الدقيقة على نفس الموديل", DetailKeys);
+        Run("إصدار iOS بين السجلات والقطعة المشتركة", BuildsAndShared);
+        Run("ما يحسم بين أعلى سببين", Decider);
         Run("البطارية غير الأصلية من السعة المبرمجة", BatteryOrigin);
         Run("إخفاء معرّفات الجهاز دون تغيير التشخيص", Anonymize);
         Run("السجلات ونتائجها المتوقعة (.expected)", ExpectedSamples);
@@ -576,6 +579,87 @@ static partial class Program
         var before = string.Join(",", free.Candidates.Select(x => x.Part + x.Score));
         PanicAnalyzer.ApplyShopHistory(free, new List<(string, int)> { ("فلاتة صينية", 4) }, false);
         Check(string.Join(",", free.Candidates.Select(x => x.Part + x.Score)) == before, "قطعة بنص حر: دليل فقط");
+    }
+
+    static void DetailKeys()
+    {
+        Diagnosis A(string text) => PanicAnalyzer.Analyze(PanicParser.Parse(text, "x"));
+        var sensors = A("panic(cpu 0 caller 0x0): userspace watchdog timeout: no successful checkins from thermalmonitord\nMissing sensor(s): Prs0 mic1\nservice: thermalmonitord, no successful checkins in 180 seconds");
+        Check(sensors.DetailKey == "sensors:mic1,prs0", "الحساسات معًا مرتبة: " + sensors.DetailKey);
+        var i2c = A("panic(cpu 1 caller 0xfffffff012345678): i2c3 bus stuck SDA low");
+        Check(i2c.Kind == "خط I2C" && i2c.DetailKey == "i2c:3", $"رقم خط I2C: {i2c.Kind} {i2c.DetailKey}");
+        var aop = A("panic(cpu 0 caller 0xfffffff012345678): AOP PANIC - SCMto: 0 - prox");
+        Check(aop.DetailKey == "aop:scmto: 0 - prox", "سطر AOP كما هو: " + aop.DetailKey);
+        var h1 = A("panic(cpu 2 caller 0xfffffff0aaaa1111): some new failure at 0xfffffff0deadbeef count 123456");
+        var h2 = A("panic(cpu 4 caller 0xfffffff0bbbb2222): some new failure at 0xfffffff012345678 count 654321");
+        Check(h1.DetailKey != "" && h1.DetailKey == h2.DetailKey, "سطر الانهيار بلا عناوين ولا أرقام طويلة: " + h1.DetailKey);
+        Check(A("").DetailKey == "", "سجل فارغ بلا بصمة");
+
+        using var c = new SqliteConnection("Data Source=:memory:");
+        c.Open();
+        void Exec(string sql, params object[] p)
+        {
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = sql;
+            for (int i = 0; i < p.Length; i++) cmd.Parameters.AddWithValue("@p" + i, p[i] ?? DBNull.Value);
+            cmd.ExecuteNonQuery();
+        }
+        List<(string Part, int Count)> Rows(string sql, params object[] p)
+        {
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = sql;
+            for (int i = 0; i < p.Length; i++) cmd.Parameters.AddWithValue("@p" + i, p[i] ?? DBNull.Value);
+            using var r = cmd.ExecuteReader();
+            var rows = new List<(string, int)>();
+            while (r.Read()) rows.Add((r.GetString(0), r.GetInt32(1)));
+            return rows;
+        }
+        Exec(StoreSql.Schema);
+        foreach (var (table, col, def) in StoreSql.Migrations) Exec($"ALTER TABLE {table} ADD COLUMN {col} {def}");
+        var logs = PanicParser.ParseMany("{\"bug_type\":\"210\"}\n{\"product\":\"iPhone12,1\",\"panicString\":\"panic(cpu 0 caller 0x0): AOP PANIC - SCMto: 0 - prox\"}", "aop");
+        var d0 = PanicAnalyzer.Analyze(logs[0]);
+        Check(d0.Product == "iPhone12,1" && d0.DetailKey.StartsWith("aop:"), $"سجل AOP من ملف: {d0.Product} {d0.DetailKey}");
+        foreach (var part in new[] { Parts.FrontFlex, Parts.FrontFlex })
+            Exec(StoreSql.Insert, StoreSql.Values(d0, logs, null, "", "", "", "جاهز", part, "2026-09-28", "r").Append("2026-09-28 10:00:00").Append(1L).ToArray());
+        var rows = Rows(StoreSql.HistoryByDetail, "iPhone12,1", d0.DetailKey, 999L);
+        Check(rows.Count == 1 && rows[0] == (Parts.FrontFlex, 2), "نفس التفاصيل: " + string.Join(", ", rows));
+        Check(Rows(StoreSql.HistoryByDetail, "iPhone13,2", d0.DetailKey, 999L).Count == 0, "موديل آخر لا يُحسب");
+        var d = PanicAnalyzer.Analyze(logs[0]);
+        PanicAnalyzer.ApplyShopHistory(d, rows, HistoryScope.Detail);
+        Check(d.TopPart == Parts.FrontFlex && d.Candidates[0].Score == 78, $"حالتان ← 60+9×2 ({d.TopPart} {d.Candidates[0].Score})");
+        Check(d.Evidence.Any(e => e.What == "خبرة المحل: نفس التفاصيل على نفس الموديل" && e.IsExam), "دليل البصمة الدقيقة");
+    }
+
+    static void BuildsAndShared()
+    {
+        var logs = PanicParser.ParseMany(Sample("smc_bsc_d64_screen_sensor.ips"), "smc");
+        Diagnosis With(string sig, string build) { var d = PanicAnalyzer.Analyze(logs[0]); d.Signature = sig; d.Build = build; return d; }
+        var update = PanicAnalyzer.Combine(new[] { With("a", "20A"), With("a", "20A"), With("b", "21A"), With("b", "21A") });
+        Check(update.Evidence.Any(e => e.What == "تغيّر النمط مع تحديث iOS") && update.Candidates.Any(c => c.Part == Parts.Ios && c.Score >= 50), "النمط تغيّر مع الإصدار ← احتمال برمجي");
+        var same = PanicAnalyzer.Combine(new[] { With("a", "20A"), With("a", "20A"), With("a", "21A") });
+        Check(same.Evidence.Any(e => e.What == "نفس النمط على أكثر من إصدار iOS"), "نفس النمط على إصدارين ← عتاد");
+        var one = PanicAnalyzer.Combine(new[] { With("a", "20A"), With("a", "20A") });
+        Check(!one.Evidence.Any(e => e.What.Contains("iOS")), "إصدار واحد ← لا حكم");
+
+        Diagnosis Kind(string kind, params (string, int)[] c) => new() { Kind = kind, Signature = kind, Candidates = c.Select(x => new Candidate { Part = x.Item1, Score = x.Item2, Why = "t" }).ToList() };
+        var mixed = PanicAnalyzer.Combine(new[] { Kind("أ", (Parts.ChargingFlex, 70), (Parts.Screen, 50)), Kind("ب", (Parts.AudioParts, 70), (Parts.ChargingFlex, 60)) });
+        Check(mixed.Kind == "أنواع مختلفة" && mixed.Evidence.Any(e => e.What == "قطعة مشتركة" && e.Value == Parts.ChargingFlex), "قطعة مشتركة بين الأنواع");
+        Check(mixed.Candidates.First(c => c.Part == Parts.ChargingFlex).Score >= 60, "القطعة المشتركة ترتفع");
+    }
+
+    static void Decider()
+    {
+        Diagnosis D(params (string, int)[] c) => new() { Summary = "", Candidates = c.Select(x => new Candidate { Part = x.Item1, Score = x.Item2, Why = "t" }).ToList() };
+        Check(PanicAnalyzer.WhatDecides(D((Parts.ChargingFlex, 80), (Parts.Board, 40))) == "", "الأول متقدم بوضوح ← لا شيء");
+        var close = PanicAnalyzer.WhatDecides(D((Parts.Screen, 70), (Parts.SocRam, 65)));
+        Check(close.Contains(Parts.Screen) && close.Contains(Parts.SocRam), "متقاربان: " + close);
+        var confirmed = D((Parts.Screen, 70), (Parts.SocRam, 65));
+        confirmed.Summary = "مؤكد بالفحص العملي ← x.";
+        Check(PanicAnalyzer.WhatDecides(confirmed) == "", "المؤكد بالفحص لا يحتاج");
+        var sensor = D((Parts.Board, 66), (Parts.SocRam, 64));
+        sensor.MissingSensors.Add("mic1");
+        var text = PanicAnalyzer.WhatDecides(sensor);
+        Check(text != "", "حساس مفقود متقارب: " + text);
     }
 
     static void BatteryOrigin()

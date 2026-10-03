@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS kb_rules(id INTEGER PRIMARY KEY, name TEXT NOT NULL, 
         ("kb_rules", "priority", "INTEGER DEFAULT 0"),
         // الإصدار 4: مصفوفة حساسات SMC (الخانات غير الصفرية) — يتعلّم المحل معنى أرقامها من الحالات المؤكدة
         ("analyses", "smc_array", "TEXT"),
+        // الإصدار 5: البصمة الدقيقة (الحساسات معًا، موضع فشل SMC، خط I2C، رسالة AOP، سطر الانهيار) — تُقارن على نفس الموديل
+        ("analyses", "detail_key", "TEXT"),
     };
 
     public const string Indexes = @"
@@ -55,8 +57,8 @@ CREATE INDEX IF NOT EXISTS ix_audit_date ON audit_log(date);";
 
     // ------------------------------------------------------------------ حفظ وقراءة الفحص
     const string Cols = "customer, phone, device, product, device_key, ios, panic_time, kind, title, top_part, confidence, logs, flags, result, notes, raw, status, " +
-                        "signature, learn_pattern, top3, build, fixed_part, fixed_date, answers, smc_array";
-    const int ColCount = 25;
+                        "signature, learn_pattern, top3, build, fixed_part, fixed_date, answers, smc_array, detail_key";
+    const int ColCount = 26;
 
     public static readonly string Insert =
         $"INSERT INTO analyses({Cols}, date, user_id) VALUES({string.Join(",", Enumerable.Range(0, ColCount + 2).Select(i => "@p" + i))})";
@@ -79,7 +81,7 @@ CREATE INDEX IF NOT EXISTS ix_audit_date ON audit_log(date);";
             d.Kind, d.Title, d.TopPart, d.Confidence, d.LogCount, (flags ?? new CaseFlags()).Encode(),
             report, (notes ?? "").Trim(), EncodeLogs(logs), Statuses.Contains(status) ? status : Statuses[0],
             d.Signature, d.LearnPattern, top3, d.Build, (fixedPart ?? "").Trim(), (fixedPart ?? "").Trim() == "" ? "" : fixedDate ?? "",
-            PanicAnalyzer.EncodeAnswers(answers), PanicAnalyzer.SensorArrayKey(d),
+            PanicAnalyzer.EncodeAnswers(answers), PanicAnalyzer.SensorArrayKey(d), d.DetailKey ?? "",
         };
     }
 
@@ -115,6 +117,10 @@ CREATE INDEX IF NOT EXISTS ix_audit_date ON audit_log(date);";
     /// <summary>نفس مصفوفة حساسات SMC على نفس الموديل (@p0 الموديل، @p1 المصفوفة، @p2 الفحص الحالي)</summary>
     public const string HistoryBySensorArray = @"SELECT TRIM(fixed_part) AS part, COUNT(*) AS n FROM analyses
         WHERE product=@p0 AND smc_array=@p1 AND @p1<>'' AND id<>@p2 AND TRIM(IFNULL(fixed_part,''))<>'' GROUP BY TRIM(fixed_part) ORDER BY n DESC";
+
+    /// <summary>نفس البصمة الدقيقة على نفس الموديل (@p0 الموديل، @p1 البصمة الدقيقة، @p2 الفحص الحالي)</summary>
+    public const string HistoryByDetail = @"SELECT TRIM(fixed_part) AS part, COUNT(*) AS n FROM analyses
+        WHERE product=@p0 AND detail_key=@p1 AND @p1<>'' AND id<>@p2 AND TRIM(IFNULL(fixed_part,''))<>'' GROUP BY TRIM(fixed_part) ORDER BY n DESC";
 
     public const string SameBuildDevices = @"SELECT COUNT(DISTINCT device_key) FROM analyses
         WHERE IFNULL(build,'')<>'' AND build=@p0 AND IFNULL(signature,'')<>'' AND signature=@p1 AND IFNULL(device_key,'')<>@p2";
