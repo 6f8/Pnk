@@ -21,8 +21,7 @@ public sealed class RebootWatch
     public RebootWatch(Func<IReadOnlyCollection<string>> connected) { this.connected = connected; }
 
     /// <summary>المهلة: ضعف المدة من الإقلاع إلى الانهيار في السجل، بين 4 و 15 دقيقة؛ 6 دقائق إن لم تُعرف</summary>
-    public static TimeSpan LimitFor(double? uptimeSeconds) =>
-        uptimeSeconds is double u && u > 0 ? TimeSpan.FromSeconds(Math.Clamp(u * 2, 240, 900)) : TimeSpan.FromMinutes(6);
+    public static TimeSpan LimitFor(double? uptimeSeconds) => PanicAnalyzer.IsolationWait(uptimeSeconds);
 
     public void Start(DateTime now, TimeSpan limit)
     {

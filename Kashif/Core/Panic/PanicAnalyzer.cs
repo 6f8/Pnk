@@ -626,6 +626,10 @@ public static class PanicAnalyzer
         return head + "لا يفصل بينهما شيء في السجل نفسه — سجل آخر من نفس الجهاز بعد ظهور البانك مرة ثانية يحسم الترتيب.";
     }
 
+    /// <summary>مهلة اختبار العزل: ضعف المدة من الإقلاع إلى الانهيار، بين 4 و 15 دقيقة (6 دقائق إن لم تُعرف)</summary>
+    public static TimeSpan IsolationWait(double? uptimeSeconds) =>
+        uptimeSeconds is double u && u > 0 ? TimeSpan.FromSeconds(Math.Clamp(u * 2, 240, 900)) : TimeSpan.FromMinutes(6);
+
     static int Effect(PanicKnowledge.AnswerOption o, string part) => o.Effects.TryGetValue(part, out var v) ? v : 0;
 
     static bool Confirmed(Diagnosis d) => d.Summary.StartsWith("مؤكد بالفحص", StringComparison.Ordinal);
@@ -664,7 +668,7 @@ public static class PanicAnalyzer
         if (final)
             return new(FixVerb(top.Part, name), reason, d.Confidence, true, CustomerFix(top.Part, name, true));
 
-        string wait = Count(Math.Ceiling(Kashif.Device.RebootWatch.LimitFor(d.UptimeSeconds).TotalMinutes), "دقيقة", "دقائق");
+        string wait = Count(Math.Ceiling(IsolationWait(d.UptimeSeconds).TotalMinutes), "دقيقة", "دقائق");
         var (q, sensorLog, off, _) = Decide(d, answers);
         bool close = d.Candidates.Count > 1 && top.Score - d.Candidates[1].Score < 15;
         string action =
