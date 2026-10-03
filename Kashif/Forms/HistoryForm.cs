@@ -108,7 +108,7 @@ public class HistoryForm : BaseForm
             int n;
             using (var fs = File.Create(sfd.FileName)) n = CaseExport.Write(fs, cases);
             Dialogs.Info($"صُدّرت {n} حالة مؤكدة إلى:\n{sfd.FileName}\n\nفي الملف: سجلات البانك الأصلية، والقطعة التي أصلحت كل جهاز، وملاحظات الفني. " +
-                "لا يحتوي اسم الزبون ولا هاتفه، لكن سجلات البانك نفسها تحمل معرّفات الجهاز.", "تصدير الحالات");
+                "لا يحتوي اسم الزبون ولا هاتفه، ومعرّفات الجهاز في السجلات (المفتاح، UDID، الرقم التسلسلي، IMEI) مستبدلة ببدائل.", "تصدير الحالات");
         }
         catch (Exception ex) { Ui.Warn("تعذر التصدير: " + ex.Message); }
     }

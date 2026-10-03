@@ -17,8 +17,11 @@ public static class CaseExport
         string TopPart, string Top3, string FixedPart, string FixedDate, string Flags, string Answers, string Notes, string Raw);
 
     /// <summary>يكتب الحالات إلى zip ويعيد عددها (الحالات بلا سجلات محفوظة تُتجاوز)</summary>
-    public static int Write(Stream output, IEnumerable<Case> cases)
+    /// <param name="anonymize">إخفاء معرّفات الجهاز من السجلات والملاحظات (البديل ثابت داخل نفس الملف)</param>
+    public static int Write(Stream output, IEnumerable<Case> cases, bool anonymize = true)
     {
+        var anon = anonymize ? new Anonymizer() : null;
+        string A(string t) => anon == null ? t : anon.Clean(t);
         int n = 0;
         using var zip = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true);
         foreach (var c in cases)
@@ -42,12 +45,13 @@ public static class CaseExport
                 .AppendLine($"تاريخ الإصلاح: {c.FixedDate}")
                 .AppendLine($"ما حدث للجهاز: {c.Flags}")
                 .AppendLine($"أجوبة الفحص: {c.Answers}")
-                .AppendLine($"ملاحظات الفني: {c.Notes}");
+                .AppendLine($"ملاحظات الفني: {A(c.Notes)}")
+                .AppendLine(anonymize ? "معرّفات الجهاز (المفتاح، UDID، الرقم التسلسلي، IMEI) مستبدلة ببدائل." : "");
             Entry(zip, dir + "case.txt", sb.ToString());
             for (int i = 0; i < logs.Count; i++)
             {
                 var name = Safe(logs[i].Source);
-                Entry(zip, $"{dir}{i + 1:D2}-{(name == "" ? "log" : name)}{(name.Contains('.') ? "" : ".txt")}", logs[i].Raw);
+                Entry(zip, $"{dir}{i + 1:D2}-{(name == "" ? "log" : name)}{(name.Contains('.') ? "" : ".txt")}", A(logs[i].Raw));
             }
         }
         return n;

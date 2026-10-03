@@ -112,6 +112,7 @@ public class AnalyzeForm : BaseForm
         moreMenu.Items.Add("فحص الجهاز بالكيبل (الهوية، البطارية، الشحن)", null, (s, e) => InspectDevice());
         moreMenu.Items.Add(new ToolStripSeparator());
         moreMenu.Items.Add("نص السجل", null, (s, e) => ShowRaw(null));
+        moreMenu.Items.Add("نسخ نص السجل بلا معرّفات (للمشاركة)", null, (s, e) => CopyAnonymized());
         var logsItem = new ToolStripMenuItem("إظهار قائمة السجلات", null, (s, e) => { logsToggledByUser = true; SetLogsVisible(!logsCard.Visible); });
         moreMenu.Items.Add(logsItem);
         moreMenu.Opening += (s, e) => logsItem.Text = logsCard.Visible ? "إخفاء قائمة السجلات" : "إظهار قائمة السجلات";
@@ -491,6 +492,16 @@ public class AnalyzeForm : BaseForm
             var r = Dialogs.Message(text, title, Tone.Info, ("إغلاق", DialogResult.Cancel, BtnKind.Secondary), ("إعادة الفحص", DialogResult.Retry, BtnKind.Primary));
             if (r != DialogResult.Retry) return;
         }
+    }
+
+    /// <summary>نص السجلات المعروضة بعد إخفاء معرّفات الجهاز — للإرسال إلى فني آخر أو للمطور</summary>
+    void CopyAnonymized()
+    {
+        if (shownLogs.Count == 0) { Ui.Warn("لا يوجد سجل مفتوح."); return; }
+        var anon = new Anonymizer();
+        var text = string.Join("\n\n", shownLogs.Select(l => anon.Clean(l.Raw)));
+        try { Clipboard.SetText(text); Toast.Show("نُسخ السجل بلا معرّفات الجهاز — التشخيص لا يتغير"); }
+        catch (Exception ex) { Ui.Warn("تعذر النسخ: " + ex.Message); }
     }
 
     /// <summary>من «المزيد»: حفظ آخر سجل تشخيص اتصال وفتح مجلده</summary>

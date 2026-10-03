@@ -18,6 +18,7 @@ static partial class Program
         Run("تاريخ الإصلاح وثبات مدة الانهيار", RepairAndUptime);
         Run("خبرة المحل: نفس البصمة ونفس مصفوفة الحساسات", ShopHistory);
         Run("البطارية غير الأصلية من السعة المبرمجة", BatteryOrigin);
+        Run("إخفاء معرّفات الجهاز دون تغيير التشخيص", Anonymize);
         Run("السجلات ونتائجها المتوقعة (.expected)", ExpectedSamples);
         Run("اللقطات: ترتيب الأسباب لم يتغير دون قصد", Snapshots);
         Run("تحمّل: نصوص تالفة وعشوائية", Fuzz);
@@ -594,5 +595,34 @@ static partial class Program
         var unknown = Fresh();
         PanicAnalyzer.ApplyBatteryOrigin(unknown, "iPhone12,3", 1000);
         Check(!unknown.Evidence.Any(e => e.What.Contains("البطارية")), "موديل بلا سعة معروفة ← لا حكم");
+    }
+
+    static void Anonymize()
+    {
+        foreach (var name in new[] { "prs0_iphone11_ocr.txt", "smc_bsc_d64_screen_sensor.ips", "mic1_iphonex_valid.ips", "kernel_wlan_backtrace_valid.ips" })
+        {
+            var raw = Sample(name);
+            var orig = PanicParser.ParseMany(raw, name);
+            var anon = new Anonymizer();
+            var clean = anon.Clean(raw);
+            var back = PanicParser.ParseMany(clean, name);
+            Check(back.Count == orig.Count, $"{name}: نفس عدد السجلات");
+            if (back.Count == 0) continue;
+            var d1 = PanicAnalyzer.Analyze(orig[0]);
+            var d2 = PanicAnalyzer.Analyze(back[0]);
+            Check(d1.Device == d2.Device && d1.Signature == d2.Signature && d1.TopPart == d2.TopPart && d1.Candidates.Count == d2.Candidates.Count,
+                $"{name}: التشخيص لم يتغير ({d2.Device} · {d2.Signature} · {d2.TopPart})");
+            if (orig[0].CrashReporterKey.Length == 40)
+            {
+                Check(!clean.Contains(orig[0].CrashReporterKey, StringComparison.OrdinalIgnoreCase), $"{name}: المفتاح الأصلي اختفى");
+                Check(back[0].CrashReporterKey.Length == 40 && back[0].CrashReporterKey.All(Uri.IsHexDigit), $"{name}: البديل بنفس الشكل");
+                Check(anon.Clean(raw) == clean, $"{name}: البديل ثابت داخل نفس العملية (التجميع يعمل)");
+                Check(new Anonymizer().Clean(raw) != clean, $"{name}: مختلف بين عملية وأخرى");
+            }
+            if (orig[0].IncidentId != "") Check(!clean.Contains(orig[0].IncidentId, StringComparison.OrdinalIgnoreCase), $"{name}: incident_id اختفى");
+        }
+        var notes = new Anonymizer().Clean("الجهاز الموصول: iPhone · الرقم التسلسلي F2LXK0Q1ABCD · IMEI 356000000000001 · 00008110-000A1B2C3D4E5F6A");
+        Check(!notes.Contains("F2LXK0Q1ABCD") && !notes.Contains("356000000000001") && !notes.Contains("000A1B2C3D4E5F6A") && notes.Contains("iPhone"),
+            "الملاحظات: الرقم التسلسلي و IMEI و UDID: " + notes);
     }
 }
